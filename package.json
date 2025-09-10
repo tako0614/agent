@@ -1,0 +1,27 @@
+{
+  "name": "workers-hono-vite-solid",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev:client": "vite --config client/vite.config.ts",
+    "dev:worker": "miniflare worker/index.ts --watch --modules",
+    "dev": "concurrently \"npm:dev:client\" \"npm:dev:worker\"",
+    "build:client": "vite build --config client/vite.config.ts --outDir dist/client",
+    "build:worker": "esbuild worker/index.ts --bundle --platform=neutral --format=esm --outfile=dist/worker.js --target=es2020",
+    "build": "npm run build:client && npm run build:worker",
+    "start": "miniflare dist/worker.js --modules --watch"
+  },
+  "dependencies": {
+    "hono": "^3.0.0",
+    "solid-js": "^1.7.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "vite-plugin-solid": "^2.0.0",
+    "esbuild": "^0.18.0",
+    "typescript": "^5.0.0",
+    "miniflare": "^3.0.0",
+    "concurrently": "^8.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
