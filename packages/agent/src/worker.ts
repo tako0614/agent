@@ -29,9 +29,4 @@ app.get('/api/status', (c) => {
   });
 });
 
-// フォールバック
-app.all('*', (c) => {
-  return c.text('Worker is running. Visit /api/hello for API endpoint.', 200);
-});
-
 export default app;
