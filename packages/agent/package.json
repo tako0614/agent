@@ -10,8 +10,10 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.1.13",
     "hono": "^4.0.0",
-    "solid-js": "^1.8.0"
+    "solid-js": "^1.8.0",
+    "tailwindcss": "^4.1.13"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",
