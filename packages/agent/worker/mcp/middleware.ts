@@ -4,30 +4,28 @@ import { createAuthService } from '../auth';
 
 /**
  * MCP Authentication middleware
- * Supports multiple authentication methods:
+ * Supports authentication methods:
  * 1. Session cookie (for logged-in users)
- * 2. API key (for external applications)
- * 3. Public access (for specific endpoints)
+ * 2. Public access (for specific endpoints)
  */
 export async function authenticateMCP(c: Context, next: () => Promise<void>, options?: {
   requireAuth?: boolean;
-  allowApiKey?: boolean;
   adminOnly?: boolean;
 }) {
-  const { requireAuth = false, allowApiKey = true, adminOnly = false } = options || {};
+  const { requireAuth = false, adminOnly = false } = options || {};
   
   let userId: string | null = null;
   let isAdmin = false;
-  let authMethod: 'session' | 'apikey' | 'none' = 'none';
+  let authMethod: 'session' | 'none' = 'none';
 
-  // 1. Check session cookie
+  // Check session cookie
   const sessionToken = getCookie(c, 'session');
   if (sessionToken) {
     const authService = createAuthService({});
     const session = authService.validateSessionToken(sessionToken);
     
     if (session) {
-      userId = session.userId;
+      userId = session.id;
       authMethod = 'session';
       
       // TODO: Check if user is admin from database
@@ -36,20 +34,8 @@ export async function authenticateMCP(c: Context, next: () => Promise<void>, opt
     }
   }
 
-  // 2. Check API key (for external applications)
-  if (!userId && allowApiKey) {
-    const authHeader = c.req.header('Authorization');
-    const apiKey = c.env.MCP_API_KEY;
-    
-    if (apiKey && authHeader === `Bearer ${apiKey}`) {
-      // API key authentication grants admin access
-      isAdmin = true;
-      authMethod = 'apikey';
-    }
-  }
-
-  // 3. Check authentication requirements
-  if (requireAuth && !userId && !isAdmin) {
+  // Check authentication requirements
+  if (requireAuth && !userId) {
     return c.json({ error: 'Authentication required' }, 401);
   }
 
@@ -69,21 +55,21 @@ export async function authenticateMCP(c: Context, next: () => Promise<void>, opt
  * Middleware for public endpoints (no auth required)
  */
 export async function publicEndpoint(c: Context, next: () => Promise<void>) {
-  await authenticateMCP(c, next, { requireAuth: false, allowApiKey: true });
+  await authenticateMCP(c, next, { requireAuth: false });
 }
 
 /**
- * Middleware for authenticated endpoints (session or API key required)
+ * Middleware for authenticated endpoints (session required)
  */
 export async function requireAuth(c: Context, next: () => Promise<void>) {
-  await authenticateMCP(c, next, { requireAuth: true, allowApiKey: true });
+  await authenticateMCP(c, next, { requireAuth: true });
 }
 
 /**
  * Middleware for admin-only endpoints
  */
 export async function requireAdmin(c: Context, next: () => Promise<void>) {
-  await authenticateMCP(c, next, { requireAuth: true, allowApiKey: true, adminOnly: true });
+  await authenticateMCP(c, next, { requireAuth: true, adminOnly: true });
 }
 
 /**

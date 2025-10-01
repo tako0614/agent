@@ -6,8 +6,6 @@ import accountRouter from './account';
 
 
 type Bindings = {
-
-  MCP_API_KEY?: string;
   DATABASE_URL?: string;
 };
 
@@ -396,7 +394,8 @@ app.get('/tools/form/:id', publicEndpoint, async (c) => {
 // [PUBLIC] Submit a form
 app.post('/tools/form/:id/submit', publicEndpoint, async (c) => {
   const id = c.req.param('id');
-  const body = await c.req.json();
+  // TODO: Process form submission data
+  // const body = await c.req.json();
   
   const userId = getCurrentUserId(c); // May be null for anonymous submissions
   

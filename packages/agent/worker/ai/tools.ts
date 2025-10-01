@@ -20,6 +20,9 @@ export async function executeToolCall(
 ): Promise<ToolResult> {
   try {
     switch (toolCall.name) {
+      case 'account_tool':
+        return await executeAccountTool(c, toolCall.params);
+      
       case 'booking_tool':
         return await executeBookingTool(c, toolCall.params);
       
@@ -43,6 +46,107 @@ export async function executeToolCall(
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
+  }
+}
+
+async function executeAccountTool(
+  c: Context,
+  params: any
+): Promise<ToolResult> {
+  const { action, email, name, password, sessionToken } = params;
+
+  switch (action) {
+    case 'register': {
+      // [PUBLIC] Register a new account
+      const response = await fetch(
+        `${c.req.url.split('/api')[0]}/mcp/account/register`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, name, password }),
+        }
+      );
+      const data = await response.json();
+      return { success: true, data };
+    }
+
+    case 'login': {
+      // [PUBLIC] Login with email and password
+      const response = await fetch(
+        `${c.req.url.split('/api')[0]}/mcp/account/login`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        }
+      );
+      const data = await response.json();
+      return { success: true, data };
+    }
+
+    case 'get_profile': {
+      // [AUTH] Get current user profile
+      const response = await fetch(
+        `${c.req.url.split('/api')[0]}/mcp/account/me`,
+        {
+          headers: {
+            'Cookie': sessionToken ? `session=${sessionToken}` : '',
+          }
+        }
+      );
+      const data = await response.json();
+      return { success: true, data };
+    }
+
+    case 'update': {
+      // [AUTH] Update account information
+      const response = await fetch(
+        `${c.req.url.split('/api')[0]}/mcp/account/update`,
+        {
+          method: 'PUT',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cookie': sessionToken ? `session=${sessionToken}` : '',
+          },
+          body: JSON.stringify({ name, email }),
+        }
+      );
+      const data = await response.json();
+      return { success: true, data };
+    }
+
+    case 'delete': {
+      // [AUTH] Delete account
+      const response = await fetch(
+        `${c.req.url.split('/api')[0]}/mcp/account/delete`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Cookie': sessionToken ? `session=${sessionToken}` : '',
+          }
+        }
+      );
+      const data = await response.json();
+      return { success: true, data };
+    }
+
+    case 'logout': {
+      // [AUTH] Logout
+      const response = await fetch(
+        `${c.req.url.split('/api')[0]}/mcp/account/logout`,
+        {
+          method: 'POST',
+          headers: {
+            'Cookie': sessionToken ? `session=${sessionToken}` : '',
+          }
+        }
+      );
+      const data = await response.json();
+      return { success: true, data };
+    }
+
+    default:
+      return { success: false, error: `Unknown account action: ${action}` };
   }
 }
 
@@ -118,8 +222,7 @@ async function executeBookingTool(
         {
           method: 'POST',
           headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ 
             name: params.serviceName,
@@ -136,12 +239,7 @@ async function executeBookingTool(
     case 'list_all': {
       // [ADMIN] List all bookings for a service
       const response = await fetch(
-        `${c.req.url.split('/api')[0]}/mcp/tools/booking/service/${serviceId}/bookings`,
-        {
-          headers: {
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
-          }
-        }
+        `${c.req.url.split('/api')[0]}/mcp/tools/booking/service/${serviceId}/bookings`
       );
       const data = await response.json();
       return { success: true, data };
@@ -199,8 +297,7 @@ async function executeProductTool(
         {
           method: 'POST',
           headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ name, description, price, stock, images }),
         }
@@ -216,8 +313,7 @@ async function executeProductTool(
         {
           method: 'PUT',
           headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ name, description, price, stock }),
         }
@@ -231,10 +327,7 @@ async function executeProductTool(
       const response = await fetch(
         `${c.req.url.split('/api')[0]}/mcp/tools/product/${productId}`,
         {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
-          }
+          method: 'DELETE'
         }
       );
       const data = await response.json();
@@ -299,12 +392,7 @@ async function executeOrderTool(c: Context, params: any): Promise<ToolResult> {
     case 'list_all': {
       // [ADMIN] List all orders
       const response = await fetch(
-        `${c.req.url.split('/api')[0]}/mcp/tools/order/list`,
-        {
-          headers: {
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
-          }
-        }
+        `${c.req.url.split('/api')[0]}/mcp/tools/order/list`
       );
       const data = await response.json();
       return { success: true, data };
@@ -317,8 +405,7 @@ async function executeOrderTool(c: Context, params: any): Promise<ToolResult> {
         {
           method: 'PUT',
           headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ status, trackingNumber, notes: params.notes }),
         }
@@ -379,12 +466,7 @@ async function executeFormTool(c: Context, params: any): Promise<ToolResult> {
     case 'list': {
       // [ADMIN] List all forms
       const response = await fetch(
-        `${c.req.url.split('/api')[0]}/mcp/tools/form/list`,
-        {
-          headers: {
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
-          }
-        }
+        `${c.req.url.split('/api')[0]}/mcp/tools/form/list`
       );
       const responseData = await response.json();
       return { success: true, data: responseData };
@@ -393,12 +475,7 @@ async function executeFormTool(c: Context, params: any): Promise<ToolResult> {
     case 'list_submissions': {
       // [ADMIN] List form submissions
       const response = await fetch(
-        `${c.req.url.split('/api')[0]}/mcp/tools/form/${formId}/submissions`,
-        {
-          headers: {
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
-          }
-        }
+        `${c.req.url.split('/api')[0]}/mcp/tools/form/${formId}/submissions`
       );
       const responseData = await response.json();
       return { success: true, data: responseData };
@@ -411,8 +488,7 @@ async function executeFormTool(c: Context, params: any): Promise<ToolResult> {
         {
           method: 'PUT',
           headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ name, description, fields, settings }),
         }
@@ -426,10 +502,7 @@ async function executeFormTool(c: Context, params: any): Promise<ToolResult> {
       const response = await fetch(
         `${c.req.url.split('/api')[0]}/mcp/tools/form/${formId}`,
         {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${c.env.MCP_API_KEY || ''}`
-          }
+          method: 'DELETE'
         }
       );
       const responseData = await response.json();

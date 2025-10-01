@@ -24,12 +24,25 @@ export const AuthProvider: ParentComponent = (props) => {
   const [isAuthenticated, setIsAuthenticated] = createSignal(false);
   const [isLoading, setIsLoading] = createSignal(true);
 
+  console.log('[Auth] Provider initialized, isLoading:', isLoading());
+
   const checkAuth = async () => {
+    console.log('[Auth] Checking authentication status... isLoading before:', isLoading());
     try {
       const response = await fetch('/auth/status', {
         credentials: 'include'
       });
+      
+      console.log('[Auth] Status response:', response.status, response.ok);
+      
+      if (!response.ok) {
+        console.warn('[Auth] Status check failed with status:', response.status);
+        setIsLoading(false);
+        return;
+      }
+      
       const data = await response.json() as { authenticated: boolean; userId?: string };
+      console.log('[Auth] Status data:', data);
       
       if (data.authenticated) {
         setIsAuthenticated(true);
@@ -39,28 +52,40 @@ export const AuthProvider: ParentComponent = (props) => {
         });
         if (userResponse.ok) {
           const userData = await userResponse.json() as User;
+          console.log('[Auth] User data loaded:', userData);
           setUser(userData);
+        } else {
+          console.warn('[Auth] Failed to fetch user info:', userResponse.status);
         }
+      } else {
+        console.log('[Auth] User not authenticated');
       }
     } catch (error) {
-      console.error('Failed to check auth status:', error);
+      console.error('[Auth] Failed to check auth status:', error);
     } finally {
+      console.log('[Auth] Loading complete, setting isLoading to false');
       setIsLoading(false);
+      console.log('[Auth] isLoading after setIsLoading(false):', isLoading());
     }
   };
 
   onMount(() => {
-    checkAuth();
+    console.log('[Auth] onMount called');
     
     // Check for login status from OAuth redirect
     const params = new URLSearchParams(window.location.search);
     if (params.get('login') === 'success') {
+      console.log('[Auth] Login success detected');
       checkAuth();
       // Clean up URL
       window.history.replaceState({}, '', window.location.pathname);
     } else if (params.get('login') === 'error') {
-      console.error('Login failed');
+      console.error('[Auth] Login failed');
+      setIsLoading(false);
       window.history.replaceState({}, '', window.location.pathname);
+    } else {
+      // Normal auth check
+      checkAuth();
     }
   });
 

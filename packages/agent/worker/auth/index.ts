@@ -10,7 +10,7 @@ export interface UserInfo {
   email: string;
   name: string;
   picture?: string;
-  provider: 'google' | 'line';
+  provider: 'google' | 'line' | 'email';
 }
 
 export class AuthService {
@@ -179,9 +179,13 @@ export class AuthService {
   /**
    * Create a session token
    */
-  createSessionToken(userId: string): string {
+  createSessionToken(userInfo: UserInfo): string {
     const payload = {
-      userId,
+      userId: userInfo.id,
+      email: userInfo.email,
+      name: userInfo.name,
+      picture: userInfo.picture,
+      provider: userInfo.provider,
       exp: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
     };
     return btoa(JSON.stringify(payload));
@@ -190,7 +194,7 @@ export class AuthService {
   /**
    * Validate session token
    */
-  validateSessionToken(token: string): { userId: string } | null {
+  validateSessionToken(token: string): UserInfo | null {
     try {
       const payload = JSON.parse(atob(token));
       
@@ -198,7 +202,13 @@ export class AuthService {
         return null; // Token expired
       }
 
-      return { userId: payload.userId };
+      return {
+        id: payload.userId,
+        email: payload.email,
+        name: payload.name,
+        picture: payload.picture,
+        provider: payload.provider
+      };
     } catch {
       return null;
     }

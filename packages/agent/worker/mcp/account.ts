@@ -1,32 +1,32 @@
 import { Hono } from 'hono';
-import { setCookie } from 'hono/cookie';
+import { setCookie, getCookie } from 'hono/cookie';
 import { createAuthService } from '../auth';
+import { publicEndpoint, requireAuth, getCurrentUserId } from './middleware';
 
 type Bindings = {
   DATABASE_URL?: string;
-  MCP_API_KEY?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
 
 /**
  * MCP Account Management Tools
- * These endpoints allow external users to create and manage accounts via MCP protocol
+ * These endpoints allow AI agents to create and manage user accounts
  */
 
 // ========================================
-// PUBLIC ACCOUNT ENDPOINTS
+// PUBLIC ACCOUNT TOOL ENDPOINTS
 // ========================================
 
 /**
  * Create a new account
- * Can be called by external MCP clients
+ * [PUBLIC] Can be called by AI agents to register users
  */
-app.post('/account/register', async (c) => {
+app.post('/register', publicEndpoint, async (c) => {
   const body = await c.req.json() as {
     email: string;
     name: string;
-    password?: string; // Optional for OAuth users
+    password?: string;
     provider?: 'google' | 'line' | 'email';
     providerId?: string;
   };
@@ -51,13 +51,14 @@ app.post('/account/register', async (c) => {
     id: `user_${Date.now()}`,
     email: body.email,
     name: body.name,
-    provider: body.provider || 'email',
+    provider: body.provider || 'email' as const,
+    picture: undefined,
     createdAt: new Date().toISOString()
   };
 
   // Create session for new user
   const authService = createAuthService({});
-  const sessionToken = authService.createSessionToken(mockUser.id);
+  const sessionToken = authService.createSessionToken(mockUser);
 
   // Set session cookie
   setCookie(c, 'session', sessionToken, {
@@ -72,6 +73,7 @@ app.post('/account/register', async (c) => {
     success: true,
     data: {
       user: mockUser,
+      sessionToken,
       message: 'Account created successfully'
     }
   });
@@ -79,34 +81,30 @@ app.post('/account/register', async (c) => {
 
 /**
  * Get account information
- * Requires authentication (session or API key)
+ * [AUTH] Requires authentication
  */
-app.get('/account/me', async (c) => {
-  // Check authentication
-  const sessionToken = c.req.header('Authorization')?.replace('Bearer ', '') || 
-                       c.req.header('Cookie')?.match(/session=([^;]+)/)?.[1];
+app.get('/me', requireAuth, async (c) => {
+  const userId = getCurrentUserId(c);
 
-  if (!sessionToken) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
-
-  const authService = createAuthService({});
-  const session = authService.validateSessionToken(sessionToken);
-
-  if (!session) {
-    return c.json({ error: 'Invalid or expired session' }, 401);
+  if (!userId) {
+    return c.json({ error: 'User not found' }, 404);
   }
 
   // TODO: Get user from database
   // const user = await prisma.user.findUnique({
-  //   where: { id: session.userId }
+  //   where: { id: userId }
   // });
 
+  const sessionToken = getCookie(c, 'session');
+  const authService = createAuthService({});
+  const session = authService.validateSessionToken(sessionToken || '');
+
   const mockUser = {
-    id: session.userId,
-    email: 'user@example.com',
-    name: 'User Name',
-    provider: 'email',
+    id: userId,
+    email: session?.email || 'user@example.com',
+    name: session?.name || 'User Name',
+    provider: session?.provider || 'email',
+    picture: session?.picture,
     createdAt: new Date().toISOString()
   };
 
@@ -118,22 +116,13 @@ app.get('/account/me', async (c) => {
 
 /**
  * Update account information
- * Requires authentication
+ * [AUTH] Requires authentication
  */
-app.put('/account/update', async (c) => {
-  // Check authentication
-  const sessionToken = c.req.header('Authorization')?.replace('Bearer ', '') || 
-                       c.req.header('Cookie')?.match(/session=([^;]+)/)?.[1];
+app.put('/update', requireAuth, async (c) => {
+  const userId = getCurrentUserId(c);
 
-  if (!sessionToken) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
-
-  const authService = createAuthService({});
-  const session = authService.validateSessionToken(sessionToken);
-
-  if (!session) {
-    return c.json({ error: 'Invalid or expired session' }, 401);
+  if (!userId) {
+    return c.json({ error: 'User not found' }, 404);
   }
 
   const body = await c.req.json() as {
@@ -143,7 +132,7 @@ app.put('/account/update', async (c) => {
 
   // TODO: Update user in database
   // const user = await prisma.user.update({
-  //   where: { id: session.userId },
+  //   where: { id: userId },
   //   data: body
   // });
 
@@ -151,7 +140,7 @@ app.put('/account/update', async (c) => {
     success: true,
     data: {
       message: 'Account updated successfully',
-      userId: session.userId,
+      userId,
       updates: body
     }
   });
@@ -159,28 +148,28 @@ app.put('/account/update', async (c) => {
 
 /**
  * Delete account
- * Requires authentication
+ * [AUTH] Requires authentication
  */
-app.delete('/account/delete', async (c) => {
-  // Check authentication
-  const sessionToken = c.req.header('Authorization')?.replace('Bearer ', '') || 
-                       c.req.header('Cookie')?.match(/session=([^;]+)/)?.[1];
+app.delete('/delete', requireAuth, async (c) => {
+  const userId = getCurrentUserId(c);
 
-  if (!sessionToken) {
-    return c.json({ error: 'Authentication required' }, 401);
-  }
-
-  const authService = createAuthService({});
-  const session = authService.validateSessionToken(sessionToken);
-
-  if (!session) {
-    return c.json({ error: 'Invalid or expired session' }, 401);
+  if (!userId) {
+    return c.json({ error: 'User not found' }, 404);
   }
 
   // TODO: Delete user and all related data from database
   // await prisma.user.delete({
-  //   where: { id: session.userId }
+  //   where: { id: userId }
   // });
+
+  // Clear session cookie
+  setCookie(c, 'session', '', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    maxAge: 0,
+    path: '/',
+  });
 
   return c.json({
     success: true,
@@ -190,108 +179,78 @@ app.delete('/account/delete', async (c) => {
   });
 });
 
-// ========================================
-// ADMIN ACCOUNT ENDPOINTS (API Key required)
-// ========================================
-
 /**
- * List all accounts (admin only)
+ * Login with email and password
+ * [PUBLIC] Can be called by AI agents to authenticate users
  */
-app.get('/account/list', async (c) => {
-  const authHeader = c.req.header('Authorization');
-  const apiKey = c.env.MCP_API_KEY;
-  
-  // Require API key for admin access
-  if (!apiKey || authHeader !== `Bearer ${apiKey}`) {
-    return c.json({ error: 'Admin access required' }, 403);
-  }
-
-  const page = parseInt(c.req.query('page') || '1');
-  const limit = parseInt(c.req.query('limit') || '20');
-
-  // TODO: Query database
-  // const users = await prisma.user.findMany({
-  //   skip: (page - 1) * limit,
-  //   take: limit
-  // });
-
-  const mockUsers = [
-    {
-      id: 'user_1',
-      email: 'user1@example.com',
-      name: 'User One',
-      provider: 'google',
-      createdAt: new Date().toISOString()
-    }
-  ];
-
-  return c.json({
-    success: true,
-    data: {
-      users: mockUsers,
-      page,
-      limit,
-      total: mockUsers.length
-    }
-  });
-});
-
-/**
- * Update user role (admin only)
- */
-app.put('/account/:userId/role', async (c) => {
-  const authHeader = c.req.header('Authorization');
-  const apiKey = c.env.MCP_API_KEY;
-  
-  // Require API key for admin access
-  if (!apiKey || authHeader !== `Bearer ${apiKey}`) {
-    return c.json({ error: 'Admin access required' }, 403);
-  }
-
-  const userId = c.req.param('userId');
+app.post('/login', publicEndpoint, async (c) => {
   const body = await c.req.json() as {
-    role: 'user' | 'admin';
+    email: string;
+    password: string;
   };
 
-  // TODO: Update user role in database
-  // const user = await prisma.user.update({
-  //   where: { id: userId },
-  //   data: { role: body.role }
+  // Validate input
+  if (!body.email || !body.password) {
+    return c.json({ error: 'Email and password are required' }, 400);
+  }
+
+  // TODO: Verify credentials from database
+  // const user = await prisma.user.findUnique({
+  //   where: { email: body.email }
   // });
+  // if (!user || !await verifyPassword(body.password, user.password)) {
+  //   return c.json({ error: 'Invalid credentials' }, 401);
+  // }
+
+  const mockUser = {
+    id: `user_${Date.now()}`,
+    email: body.email,
+    name: 'User Name',
+    provider: 'email' as const,
+    picture: undefined,
+  };
+
+  // Create session
+  const authService = createAuthService({});
+  const sessionToken = authService.createSessionToken(mockUser);
+
+  // Set session cookie
+  setCookie(c, 'session', sessionToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    maxAge: 7 * 24 * 60 * 60, // 7 days
+    path: '/',
+  });
 
   return c.json({
     success: true,
     data: {
-      message: `User ${userId} role updated to ${body.role}`,
-      userId,
-      role: body.role
+      user: mockUser,
+      sessionToken,
+      message: 'Login successful'
     }
   });
 });
 
 /**
- * Delete user account (admin only)
+ * Logout
+ * [AUTH] Requires authentication
  */
-app.delete('/account/:userId', async (c) => {
-  const authHeader = c.req.header('Authorization');
-  const apiKey = c.env.MCP_API_KEY;
-  
-  // Require API key for admin access
-  if (!apiKey || authHeader !== `Bearer ${apiKey}`) {
-    return c.json({ error: 'Admin access required' }, 403);
-  }
-
-  const userId = c.req.param('userId');
-
-  // TODO: Delete user from database
-  // await prisma.user.delete({
-  //   where: { id: userId }
-  // });
+app.post('/logout', requireAuth, async (c) => {
+  // Clear session cookie
+  setCookie(c, 'session', '', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    maxAge: 0,
+    path: '/',
+  });
 
   return c.json({
     success: true,
     data: {
-      message: `User ${userId} deleted successfully`
+      message: 'Logout successful'
     }
   });
 });

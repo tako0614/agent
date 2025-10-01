@@ -12,6 +12,21 @@ export interface AgentState {
 }
 
 // Tool schemas - Both Admin and User actions
+const AccountToolSchema = z.object({
+  action: z.enum([
+    'register',        // [PUBLIC] アカウントを作成
+    'login',           // [PUBLIC] ログイン
+    'get_profile',     // [AUTH] プロフィール情報を取得
+    'update',          // [AUTH] アカウント情報を更新
+    'delete',          // [AUTH] アカウントを削除
+    'logout'           // [AUTH] ログアウト
+  ]),
+  email: z.string().optional(),
+  name: z.string().optional(),
+  password: z.string().optional(),
+  sessionToken: z.string().optional(),
+});
+
 const BookingToolSchema = z.object({
   action: z.enum([
     'list_slots',      // [PUBLIC] 利用可能な予約枠を確認
@@ -119,6 +134,21 @@ const FormToolSchema = z.object({
 
 // Available tools configuration
 export const tools = [
+  {
+    name: 'account_tool',
+    description: `ユーザーアカウントを管理します。
+    
+利用者向け機能:
+- アカウントを作成 (action: 'register') - email, name, password が必要
+- ログイン (action: 'login') - email, password が必要
+- プロフィール情報を取得 (action: 'get_profile') - sessionToken が必要
+- アカウント情報を更新 (action: 'update') - sessionToken, name/email が必要
+- アカウントを削除 (action: 'delete') - sessionToken が必要
+- ログアウト (action: 'logout') - sessionToken が必要
+
+注意: ログインまたは登録後、返されたsessionTokenを他の操作で使用してください。`,
+    schema: zodToJsonSchema(AccountToolSchema),
+  },
   {
     name: 'booking_tool',
     description: `予約システムを操作します。

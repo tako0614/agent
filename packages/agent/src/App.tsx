@@ -1,4 +1,4 @@
-import { Component, createSignal, For, Show } from 'solid-js';
+import { Component, createSignal, For, Show, createEffect } from 'solid-js';
 import { MessageBubble } from './components/MessageBubble';
 import { ChatInput } from './components/ChatInput';
 import { LoadingSpinner } from './components/LoadingSpinner';
@@ -18,6 +18,10 @@ const ChatApp: Component = () => {
     }
   ]);
   const [loading, setLoading] = createSignal(false);
+
+  createEffect(() => {
+    console.log('[ChatApp] Effect triggered, isLoading:', isLoading(), 'isAuthenticated:', isAuthenticated());
+  });
 
   const handleSendMessage = async (text: string) => {
     const userMessage: Message = {
@@ -89,62 +93,63 @@ const ChatApp: Component = () => {
     }
   };
 
-  // Show loading or login screen
-  if (isLoading()) {
-    return (
-      <div class="flex items-center justify-center h-screen bg-gray-50">
-        <LoadingSpinner size={40} />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated()) {
-    return <LoginButton />;
-  }
-
   return (
-    <div class="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
-      <header class="bg-white border-b border-gray-200">
-        <UserProfile />
-        <div class="px-6 py-4">
-          <h1 class="text-2xl font-bold text-gray-900">AI Service Builder</h1>
-          <p class="text-sm text-gray-600">AIでネットサービスを簡単に作成・操作</p>
+    <Show
+      when={!isLoading()}
+      fallback={
+        <div class="flex items-center justify-center h-screen bg-gray-50">
+          <LoadingSpinner size={40} />
         </div>
-      </header>
-
-      {/* Messages */}
-      <main class="flex-1 overflow-y-auto px-6 py-4">
-        <div class="max-w-3xl mx-auto space-y-4">
-          <For each={messages()}>
-            {(message) => (
-              <MessageBubble
-                role={message.role}
-                content={message.content}
-                timestamp={message.createdAt}
-              />
-            )}
-          </For>
-          <Show when={loading()}>
-            <div class="flex justify-start">
-              <div class="bg-white border border-gray-200 rounded-lg px-4 py-3">
-                <LoadingSpinner size={20} />
-              </div>
+      }
+    >
+      <Show
+        when={isAuthenticated()}
+        fallback={<LoginButton />}
+      >
+        <div class="flex flex-col h-screen bg-gray-50">
+          {/* Header */}
+          <header class="bg-white border-b border-gray-200">
+            <UserProfile />
+            <div class="px-6 py-4">
+              <h1 class="text-2xl font-bold text-gray-900">AI Service Builder</h1>
+              <p class="text-sm text-gray-600">AIでネットサービスを簡単に作成・操作</p>
             </div>
-          </Show>
-        </div>
-      </main>
+          </header>
 
-      {/* Input */}
-      <footer class="bg-white border-t border-gray-200 px-6 py-4">
-        <div class="max-w-3xl mx-auto">
-          <ChatInput
-            onSend={handleSendMessage}
-            disabled={loading()}
-          />
+          {/* Messages */}
+          <main class="flex-1 overflow-y-auto px-6 py-4">
+            <div class="max-w-3xl mx-auto space-y-4">
+              <For each={messages()}>
+                {(message) => (
+                  <MessageBubble
+                    role={message.role}
+                    content={message.content}
+                    timestamp={message.createdAt}
+                  />
+                )}
+              </For>
+              <Show when={loading()}>
+                <div class="flex justify-start">
+                  <div class="bg-white border border-gray-200 rounded-lg px-4 py-3">
+                    <LoadingSpinner size={20} />
+                  </div>
+                </div>
+              </Show>
+            </div>
+          </main>
+
+          {/* Input */}
+          <footer class="bg-white border-t border-gray-200 px-6 py-4">
+            <div class="max-w-3xl mx-auto">
+              <ChatInput
+                onSend={handleSendMessage}
+                disabled={loading()}
+              />
+            </div>
+          </footer>
         </div>
-      </footer>
-    </div>
+      </Show>
+    </Show>
   );
 };
 

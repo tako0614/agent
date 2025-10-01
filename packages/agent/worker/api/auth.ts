@@ -126,7 +126,7 @@ app.get('/callback/google', async (c) => {
     // });
 
     // Create session token
-    const sessionToken = authService.createSessionToken(userInfo.id);
+    const sessionToken = authService.createSessionToken(userInfo);
 
     // Set session cookie
     setCookie(c, 'session', sessionToken, {
@@ -183,7 +183,7 @@ app.get('/callback/line', async (c) => {
     // });
 
     // Create session token
-    const sessionToken = authService.createSessionToken(userInfo.id);
+    const sessionToken = authService.createSessionToken(userInfo);
 
     // Set session cookie
     setCookie(c, 'session', sessionToken, {
@@ -209,34 +209,6 @@ app.get('/callback/line', async (c) => {
 });
 
 /**
- * Get current user
- */
-app.get('/me', async (c) => {
-  const sessionToken = getCookie(c, 'session');
-
-  if (!sessionToken) {
-    return c.json({ error: 'Not authenticated' }, 401);
-  }
-
-  const authService = createAuthService({});
-  const session = authService.validateSessionToken(sessionToken);
-
-  if (!session) {
-    return c.json({ error: 'Invalid or expired session' }, 401);
-  }
-
-  // TODO: Get user from database
-  // const user = await db.user.findUnique({
-  //   where: { id: session.userId }
-  // });
-
-  return c.json({
-    userId: session.userId,
-    // ...user
-  });
-});
-
-/**
  * Logout
  */
 app.post('/logout', async (c) => {
@@ -255,16 +227,44 @@ app.get('/status', async (c) => {
   }
 
   const authService = createAuthService({});
-  const session = authService.validateSessionToken(sessionToken);
+  const userInfo = authService.validateSessionToken(sessionToken);
 
-  if (!session) {
+  if (!userInfo) {
     deleteCookie(c, 'session');
     return c.json({ authenticated: false });
   }
 
   return c.json({ 
     authenticated: true,
-    userId: session.userId
+    userId: userInfo.id
+  });
+});
+
+/**
+ * Get current user information
+ */
+app.get('/me', async (c) => {
+  const sessionToken = getCookie(c, 'session');
+
+  if (!sessionToken) {
+    return c.json({ error: 'Not authenticated' }, 401);
+  }
+
+  const authService = createAuthService({});
+  const userInfo = authService.validateSessionToken(sessionToken);
+
+  if (!userInfo) {
+    deleteCookie(c, 'session');
+    return c.json({ error: 'Invalid session' }, 401);
+  }
+
+  // Return user information from session
+  return c.json({
+    userId: userInfo.id,
+    email: userInfo.email,
+    name: userInfo.name,
+    picture: userInfo.picture,
+    provider: userInfo.provider
   });
 });
 

@@ -1,11 +1,12 @@
 name = "agent"
 main = "worker/index.ts"
 compatibility_date = "2024-09-10"
+compatibility_flags = ["nodejs_compat"]
 
 [assets]
 directory = "dist"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/mcp/*"]
+run_worker_first = ["/api/*", "/mcp/*", "/auth/*"]
 
 # Environment variables (for development)
 # For production, use: wrangler secret put OPENAI_API_KEY
