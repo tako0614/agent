@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
+import type { McpVariables, AuthContext } from '../../types';
 
-const form = new Hono();
+const form = new Hono<{ Variables: McpVariables }>();
 
 // [PUBLIC] Get form structure
 form.get('/:id', async (c) => {
@@ -54,7 +55,7 @@ form.get('/:id', async (c) => {
 form.post('/:id/submit', requireScope('form:submit'), async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   const { responses } = body;
 
@@ -82,7 +83,7 @@ form.post('/:id/submit', requireScope('form:submit'), async (c) => {
 // [ADMIN] Create form
 form.post('/create', requireScope('form:admin'), async (c) => {
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   const { title, description, fields, settings } = body;
 
@@ -116,7 +117,7 @@ form.post('/create', requireScope('form:admin'), async (c) => {
 form.put('/:id', requireScope('form:admin'), async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Update form in database
   return c.json({
@@ -206,7 +207,7 @@ form.get('/', requireScope('form:admin'), async (c) => {
 // [ADMIN] Delete form
 form.delete('/:id', requireScope('form:admin'), async (c) => {
   const id = c.req.param('id');
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Delete form from database
   return c.json({

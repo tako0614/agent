@@ -55,7 +55,7 @@ export async function generateMcpToken(
     };
 
     // Sign and generate JWT
-    const token = await new jose.SignJWT(payload)
+    const token = await new jose.SignJWT({ ...payload } as any)
       .setProtectedHeader({ alg: 'RS256' })
       .setIssuer(payload.iss)
       .setSubject(payload.sub)

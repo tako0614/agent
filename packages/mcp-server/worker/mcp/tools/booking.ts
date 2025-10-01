@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
+import type { McpVariables, AuthContext } from '../../types';
 
-const booking = new Hono();
+const booking = new Hono<{ Variables: McpVariables }>();
 
 // [PUBLIC] Get available booking slots
 booking.get('/available-slots', async (c) => {
@@ -36,7 +37,7 @@ booking.get('/available-slots', async (c) => {
 // [USER] Create a booking
 booking.post('/create', requireScope('booking:create'), async (c) => {
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
   
   const { serviceId, date, time, customerName, customerEmail, notes } = body;
 
@@ -67,7 +68,7 @@ booking.post('/create', requireScope('booking:create'), async (c) => {
 // [USER] Get booking details
 booking.get('/:id', requireScope('booking:read'), async (c) => {
   const id = c.req.param('id');
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Query database
   return c.json({
@@ -89,7 +90,7 @@ booking.get('/:id', requireScope('booking:read'), async (c) => {
 // [USER] Cancel booking
 booking.post('/:id/cancel', requireScope('booking:delete'), async (c) => {
   const id = c.req.param('id');
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Cancel booking in database
   return c.json({
@@ -107,7 +108,7 @@ booking.post('/:id/cancel', requireScope('booking:delete'), async (c) => {
 // [ADMIN] Create booking service
 booking.post('/service/create', requireScope('booking:admin'), async (c) => {
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   const { name, description, duration, price, availability } = body;
 

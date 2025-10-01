@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
+import type { McpVariables, AuthContext } from '../../types';
 
-const order = new Hono();
+const order = new Hono<{ Variables: McpVariables }>();
 
 // [USER] Create order
 order.post('/create', requireScope('order:create'), async (c) => {
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   const { items, shippingAddress, billingAddress, paymentMethod } = body;
 
@@ -48,7 +49,7 @@ order.post('/create', requireScope('order:create'), async (c) => {
 // [USER] Get order details
 order.get('/:id', requireScope('order:read'), async (c) => {
   const id = c.req.param('id');
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Query database and verify ownership
   return c.json({
@@ -78,7 +79,7 @@ order.get('/:id', requireScope('order:read'), async (c) => {
 
 // [USER] Get user's order history
 order.get('/user/history', requireScope('order:read'), async (c) => {
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
   const status = c.req.query('status');
   const limit = parseInt(c.req.query('limit') || '20');
 
@@ -109,7 +110,7 @@ order.get('/user/history', requireScope('order:read'), async (c) => {
 // [USER] Cancel order
 order.post('/:id/cancel', requireScope('order:cancel'), async (c) => {
   const id = c.req.param('id');
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Cancel order in database (only if status allows)
   return c.json({
@@ -167,7 +168,7 @@ order.get('/', requireScope('order:admin'), async (c) => {
 order.put('/:id/status', requireScope('order:admin'), async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   const { status, trackingNumber, notes } = body;
 

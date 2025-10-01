@@ -12,7 +12,7 @@ type Bindings = {
 const auth = new Hono<{ Bindings: Bindings }>();
 
 // Google OAuth for MCP Administrators
-auth.get('/login/google', (c) => {
+auth.get('/login/google', async (c) => {
   const google = new Google(
     c.env.MCP_GOOGLE_CLIENT_ID || '',
     c.env.MCP_GOOGLE_CLIENT_SECRET || '',
@@ -20,10 +20,12 @@ auth.get('/login/google', (c) => {
   );
 
   const state = crypto.randomUUID();
-  const url = google.createAuthorizationURL(state, ['openid', 'profile', 'email']);
+  const codeVerifier = crypto.randomUUID();
+  const url = google.createAuthorizationURL(state, codeVerifier, ['openid', 'profile', 'email']);
 
   // Store state in cookie for verification
   c.header('Set-Cookie', `mcp_oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`);
+  c.header('Set-Cookie', `mcp_code_verifier=${codeVerifier}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`);
 
   return c.redirect(url.toString());
 });
@@ -41,8 +43,11 @@ auth.get('/callback/google', async (c) => {
   // Verify state
   const stateCookie = cookies?.split(';').find(c => c.trim().startsWith('mcp_oauth_state='));
   const storedState = stateCookie?.split('=')[1];
+  
+  const verifierCookie = cookies?.split(';').find(c => c.trim().startsWith('mcp_code_verifier='));
+  const codeVerifier = verifierCookie?.split('=')[1];
 
-  if (!storedState || storedState !== state) {
+  if (!storedState || storedState !== state || !codeVerifier) {
     return c.json({ error: 'Invalid state' }, 400);
   }
 
@@ -53,7 +58,7 @@ auth.get('/callback/google', async (c) => {
       c.env.MCP_GOOGLE_REDIRECT_URI || 'http://localhost:8788/auth/callback/google'
     );
 
-    const tokens = await google.validateAuthorizationCode(code);
+    const tokens = await google.validateAuthorizationCode(code, codeVerifier);
     
     // Fetch user info from Google
     const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {

@@ -16,13 +16,7 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 // CORS middleware
 app.use('/*', cors({
-  origin: (origin) => {
-    const allowedOrigins = (c: any) => {
-      const origins = c.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:8787'];
-      return origins.includes(origin) ? origin : origins[0];
-    };
-    return allowedOrigins;
-  },
+  origin: '*', // In production, set this to specific origins
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   credentials: true,

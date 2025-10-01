@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
+import type { McpVariables, AuthContext } from '../../types';
 
-const product = new Hono();
+const product = new Hono<{ Variables: McpVariables }>();
 
 // [PUBLIC] Search products
 product.get('/search', async (c) => {
@@ -74,7 +75,7 @@ product.get('/:id', async (c) => {
 // [ADMIN] Create product
 product.post('/create', requireScope('product:admin'), async (c) => {
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   const { name, description, price, category, stock, images } = body;
 
@@ -105,7 +106,7 @@ product.post('/create', requireScope('product:admin'), async (c) => {
 product.put('/:id', requireScope('product:admin'), async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Update product in database
   return c.json({
@@ -123,7 +124,7 @@ product.put('/:id', requireScope('product:admin'), async (c) => {
 // [ADMIN] Delete product
 product.delete('/:id', requireScope('product:admin'), async (c) => {
   const id = c.req.param('id');
-  const auth = c.get('auth');
+  const auth = c.get('auth') as AuthContext;
 
   // TODO: Delete product from database
   return c.json({
