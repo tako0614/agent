@@ -178,6 +178,21 @@ npm run studio
 - **AI Service API**: http://localhost:8787/api/*
 - **MCP Tools API**: http://localhost:8788/tools/*
 
+## 🔐 アカウント管理API
+
+AIサービスはユーザーアカウントの登録・認証・管理を `/api/account/*` で提供します。LangGraphの `account_tool` はこれらのエンドポイントを利用します。
+
+| エンドポイント | メソッド | 説明 |
+| --- | --- | --- |
+| `/api/account/register` | POST | 新規アカウントを作成し、セッションCookieと`sessionToken`を返します |
+| `/api/account/login` | POST | メールアドレスとパスワードでログインし、セッションを開始します |
+| `/api/account/me` | GET | 現在ログインしているユーザーのプロフィール情報を取得します |
+| `/api/account/update` | PUT | 名前やメールアドレスを更新し、新しいセッションを発行します |
+| `/api/account/delete` | DELETE | アカウントを削除し、セッションを破棄します |
+| `/api/account/logout` | POST | ログアウトしてセッションを破棄します |
+
+いずれも `session` Cookie または `Authorization: Bearer <sessionToken>` で認証できます。
+
 ### 5. ビルド
 
 ```powershell
