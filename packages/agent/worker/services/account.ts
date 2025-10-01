@@ -1,4 +1,5 @@
-import { createAuthService, UserInfo } from '../auth';
+// Note: This service is deprecated
+// Use OAuth 2.1 authentication via /auth/* endpoints instead
 
 export type AccountProvider = 'email' | 'google' | 'line';
 
@@ -21,7 +22,8 @@ export class AccountError extends Error {
   }
 }
 
-const authService = createAuthService({});
+// Deprecated: Use OAuth 2.1 tokens instead
+// const authService = createAuthService({...});
 
 const accountsById = new Map<string, AccountRecord>();
 const accountsByEmail = new Map<string, AccountRecord>();
@@ -31,39 +33,14 @@ function sanitizeAccount(account: AccountRecord) {
   return rest;
 }
 
-function createSessionToken(account: AccountRecord): string {
-  const payload: UserInfo = {
-    id: account.id,
-    email: account.email,
-    name: account.name,
-    picture: account.picture,
-    provider: account.provider,
-  };
-
-  return authService.createSessionToken(payload);
+// Deprecated: Use OAuth 2.1 access tokens instead
+function createSessionToken(_account: AccountRecord): string {
+  throw new Error('Deprecated: Use OAuth 2.1 /auth/login instead');
 }
 
-function resolveAccountFromSession(token: string): AccountRecord | null {
-  const session = authService.validateSessionToken(token);
-  if (!session) {
-    return null;
-  }
-
-  const accountFromStore = accountsById.get(session.userId);
-  if (accountFromStore) {
-    return accountFromStore;
-  }
-
-  const fallbackAccount: AccountRecord = {
-    id: session.userId,
-    email: session.email,
-    name: session.name,
-    picture: session.picture,
-    provider: session.provider,
-    createdAt: new Date().toISOString(),
-  };
-
-  return fallbackAccount;
+// Deprecated: Use OAuth 2.1 token validation instead
+function resolveAccountFromSession(_token: string): AccountRecord | null {
+  throw new Error('Deprecated: Use OAuth 2.1 tokens instead');
 }
 
 export async function registerAccount(input: {

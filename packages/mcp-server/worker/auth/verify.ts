@@ -1,17 +1,57 @@
 import { PrismaClient } from '@prisma/client';
+import { jwtVerify } from 'jose';
 
 export interface TokenPayload {
-  userId: string;
+  sub: string; // userId
+  client_id: string;
   scope: string[];
+  iss: string; // issuer
+  aud: string; // audience (resource)
+  exp: number; // expiration
+  iat: number; // issued at
 }
 
 /**
- * Verify MCP Access Token from database
+ * Verify OAuth 2.1 Access Token (JWT)
+ * This is the standard MCP authentication method
+ */
+export async function verifyAccessToken(
+  token: string,
+  jwtSecret: string,
+  expectedIssuer: string,
+  expectedAudience: string
+): Promise<TokenPayload> {
+  try {
+    const secret = new TextEncoder().encode(jwtSecret);
+    
+    const { payload } = await jwtVerify(token, secret, {
+      issuer: expectedIssuer,
+      audience: expectedAudience,
+    });
+
+    return {
+      sub: payload.sub as string,
+      client_id: payload.client_id as string,
+      scope: payload.scope as string[],
+      iss: payload.iss as string,
+      aud: payload.aud as string,
+      exp: payload.exp as number,
+      iat: payload.iat as number,
+    };
+  } catch (error) {
+    console.error('Token verification error:', error);
+    throw new Error(error instanceof Error ? error.message : 'Token verification failed');
+  }
+}
+
+/**
+ * Verify MCP Access Token from database (Legacy)
+ * This is kept for backward compatibility
  */
 export async function verifyMcpAccessToken(
   prisma: PrismaClient,
   token: string
-): Promise<TokenPayload> {
+): Promise<{ userId: string; scope: string[] }> {
   try {
     const mcpToken = await prisma.mcpAccessToken.findUnique({
       where: { token },

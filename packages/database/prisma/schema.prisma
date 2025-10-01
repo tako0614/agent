@@ -26,6 +26,11 @@ model User {
   sessions      Session[]
   mcpTokens     McpAccessToken[]
 
+  // OAuth 2.1 relations
+  authorizationCodes AuthorizationCode[]
+  accessTokens       AccessToken[]
+  refreshTokens      RefreshToken[]
+
   @@map("users")
 }
 
@@ -46,7 +51,97 @@ model Session {
   @@map("sessions")
 }
 
-// MCP Access Token for AI Service <-> MCP Server communication
+// OAuth 2.1 Client Registration (DCR support)
+model OAuthClient {
+  id                      String   @id @default(cuid())
+  clientId                String   @unique
+  clientSecret            String? // Null for public clients
+  name                    String
+  redirectUris            String[] // Array of allowed redirect URIs
+  grantTypes              String[] // authorization_code, refresh_token, etc.
+  responseTypes           String[] // code, token
+  scopes                  String[] // Default scopes
+  tokenEndpointAuthMethod String   @default("none") // none, client_secret_post, client_secret_basic
+  isPublic                Boolean  @default(true) // Public client (no secret) or confidential
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  // Relations
+  authorizationCodes AuthorizationCode[]
+  accessTokens       AccessToken[]
+  refreshTokens      RefreshToken[]
+
+  @@map("oauth_clients")
+}
+
+// Authorization Code (PKCE required)
+model AuthorizationCode {
+  id                  String   @id @default(cuid())
+  code                String   @unique
+  clientId            String
+  userId              String
+  redirectUri         String
+  scope               String[] // Granted scopes
+  codeChallenge       String // PKCE code challenge
+  codeChallengeMethod String   @default("S256") // S256 or plain
+  resource            String? // Resource indicator (RFC 8707)
+  expiresAt           DateTime
+  createdAt           DateTime @default(now())
+
+  // Relations
+  client OAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([code])
+  @@index([clientId])
+  @@index([userId])
+  @@map("authorization_codes")
+}
+
+// Access Token (JWT format)
+model AccessToken {
+  id        String   @id @default(cuid())
+  token     String   @unique // JWT
+  clientId  String
+  userId    String
+  scope     String[] // Granted scopes
+  resource  String? // Resource indicator (RFC 8707)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  // Relations
+  client OAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([clientId])
+  @@index([userId])
+  @@map("access_tokens")
+}
+
+// Refresh Token
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  clientId  String
+  userId    String
+  scope     String[] // Granted scopes
+  resource  String? // Resource indicator (RFC 8707)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  client OAuthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([clientId])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// MCP Access Token for AI Service <-> MCP Server communication (Legacy - will be replaced by AccessToken)
 model McpAccessToken {
   id        String   @id @default(cuid())
   userId    String
@@ -94,9 +189,9 @@ model Task {
 
   // Relations
   userId  String
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   agentId String?
-  agent   Agent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agent   Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
   @@map("tasks")
 }
@@ -122,8 +217,8 @@ model Service {
   updatedAt   DateTime    @updatedAt
 
   // Relations
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   bookings Booking[]
   products Product[]
   forms    Form[]
@@ -132,18 +227,18 @@ model Service {
 }
 
 model Booking {
-  id          String        @id @default(cuid())
-  title       String
-  description String?
-  startTime   DateTime
-  endTime     DateTime
-  status      BookingStatus @default(PENDING)
-  customerName String?
+  id            String        @id @default(cuid())
+  title         String
+  description   String?
+  startTime     DateTime
+  endTime       DateTime
+  status        BookingStatus @default(PENDING)
+  customerName  String?
   customerEmail String?
   customerPhone String?
-  metadata    Json?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  metadata      Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   // Relations
   serviceId String
@@ -156,7 +251,7 @@ model Product {
   id          String   @id @default(cuid())
   name        String
   description String?
-  price       Int      // in cents
+  price       Int // in cents
   stock       Int      @default(0)
   images      String[] // Array of image URLs
   isActive    Boolean  @default(true)
@@ -166,7 +261,7 @@ model Product {
 
   // Relations
   serviceId String
-  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  service   Service     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   orders    OrderItem[]
 
   @@map("products")
@@ -178,7 +273,7 @@ model Order {
   customerName    String
   customerEmail   String
   customerPhone   String?
-  totalAmount     Int         // in cents
+  totalAmount     Int // in cents
   status          OrderStatus @default(PENDING)
   stripePaymentId String?
   metadata        Json?
@@ -187,7 +282,7 @@ model Order {
 
   // Relations
   userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   items  OrderItem[]
 
   @@map("orders")
@@ -196,7 +291,7 @@ model Order {
 model OrderItem {
   id        String   @id @default(cuid())
   quantity  Int
-  price     Int      // in cents
+  price     Int // in cents
   createdAt DateTime @default(now())
 
   // Relations
@@ -212,14 +307,14 @@ model Form {
   id          String   @id @default(cuid())
   name        String
   description String?
-  fields      Json     // Form field configuration
+  fields      Json // Form field configuration
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
   serviceId   String
-  service     Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  service     Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   submissions FormSubmission[]
 
   @@map("forms")
@@ -227,7 +322,7 @@ model Form {
 
 model FormSubmission {
   id        String   @id @default(cuid())
-  data      Json     // Form submission data
+  data      Json // Form submission data
   createdAt DateTime @default(now())
 
   // Relations

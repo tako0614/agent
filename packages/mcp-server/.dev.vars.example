@@ -1,11 +1,15 @@
 # MCP Server Environment Variables
 
-# Google OAuth for MCP Administrators
+# OAuth 2.1 Configuration
+MCP_ISSUER=http://localhost:8788
+JWT_SECRET=your-secret-key-at-least-32-characters-long-change-in-production
+
+# Google OAuth for MCP Users
 MCP_GOOGLE_CLIENT_ID=your-google-client-id
 MCP_GOOGLE_CLIENT_SECRET=your-google-client-secret
 MCP_GOOGLE_REDIRECT_URI=http://localhost:8788/auth/callback/google
 
-# Database Connection (shared with AI Service)
+# Database Connection
 DATABASE_URL=postgresql://user:password@localhost:5432/agent
 
 # CORS Origin

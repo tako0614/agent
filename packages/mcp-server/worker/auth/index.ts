@@ -1,17 +1,16 @@
 import { Hono } from 'hono';
 import { Google } from 'arctic';
-import { verifyAiServiceToken } from './verify';
 
 type Bindings = {
   MCP_GOOGLE_CLIENT_ID?: string;
   MCP_GOOGLE_CLIENT_SECRET?: string;
   MCP_GOOGLE_REDIRECT_URI?: string;
-  AI_SERVICE_PUBLIC_KEY?: string;
+  DATABASE_URL?: string;
 };
 
 const auth = new Hono<{ Bindings: Bindings }>();
 
-// Google OAuth for MCP Administrators
+// Google OAuth for MCP Users (not admins - standard OAuth 2.1 flow)
 auth.get('/login/google', async (c) => {
   const google = new Google(
     c.env.MCP_GOOGLE_CLIENT_ID || '',
@@ -78,15 +77,34 @@ auth.get('/callback/google', async (c) => {
       picture?: string;
     };
 
-    // TODO: Store MCP admin user in database
-    // For now, just create a session token
+    const databaseUrl = c.env.DATABASE_URL;
+    if (!databaseUrl) {
+      return c.json({ error: 'Database not configured' }, 500);
+    }
 
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+
+    // Find or create user
+    let user = await prisma.user.findUnique({
+      where: { email: userData.email },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email: userData.email,
+          name: userData.name,
+        },
+      });
+    }
+
+    // Create session
     const sessionId = crypto.randomUUID();
     const sessionData = {
-      userId: userData.id,
-      email: userData.email,
-      name: userData.name,
-      role: 'admin',
+      userId: user.id,
+      email: user.email,
+      name: user.name || '',
       createdAt: new Date().toISOString()
     };
 
@@ -96,55 +114,42 @@ auth.get('/callback/google', async (c) => {
 
     // Clear state cookie
     c.header('Set-Cookie', `mcp_oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
+    c.header('Set-Cookie', `mcp_code_verifier=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
+
+    await prisma.$disconnect();
+
+    // Check if there's a pending OAuth authorization request
+    const authRequestCookie = cookies?.split(';').find((c: string) => c.trim().startsWith('mcp_auth_request='));
+    
+    if (authRequestCookie) {
+      // Redirect back to OAuth authorize endpoint
+      return c.redirect('/oauth/authorize-continue');
+    }
 
     return c.json({
       success: true,
       user: {
-        email: userData.email,
-        name: userData.name
+        id: user.id,
+        email: user.email,
+        name: user.name,
       }
     });
   } catch (error) {
-    console.error('OAuth error:', error);
+    console.error('OAuth callback error:', error);
     return c.json({ error: 'Authentication failed' }, 500);
   }
 });
 
-// Verify AI Service Token endpoint
-auth.post('/verify-token', async (c) => {
-  const body = await c.req.json();
-  const token = body.token;
-
-  if (!token) {
-    return c.json({ error: 'Token required' }, 400);
-  }
-
-  try {
-    const publicKey = c.env.AI_SERVICE_PUBLIC_KEY || '';
-    const payload = await verifyAiServiceToken(token, publicKey);
-
-    return c.json({
-      valid: true,
-      payload
-    });
-  } catch (error) {
-    return c.json({ 
-      valid: false, 
-      error: error instanceof Error ? error.message : 'Invalid token' 
-    }, 401);
-  }
-});
-
-// Logout endpoint
+// Logout
 auth.post('/logout', (c) => {
   c.header('Set-Cookie', `mcp_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
   return c.json({ success: true });
 });
 
-// Current user endpoint
-auth.get('/me', (c) => {
+// Get current user
+auth.get('/me', async (c) => {
   const cookies = c.req.header('Cookie');
-  const sessionCookie = cookies?.split(';').find(c => c.trim().startsWith('mcp_session='));
+  const sessionCookie = cookies?.split(';').find((c: string) => c.trim().startsWith('mcp_session='));
   
   if (!sessionCookie) {
     return c.json({ error: 'Not authenticated' }, 401);
@@ -156,9 +161,9 @@ auth.get('/me', (c) => {
     
     return c.json({
       user: {
+        id: sessionData.userId,
         email: sessionData.email,
         name: sessionData.name,
-        role: sessionData.role
       }
     });
   } catch (error) {

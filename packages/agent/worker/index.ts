@@ -4,18 +4,25 @@ import api from './api';
 import auth from './api/auth';
 
 type Bindings = {
+  // Database
   DATABASE_URL?: string;
+  
+  // Payment
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  
+  // AI
   OPENAI_API_KEY?: string;
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
-  GOOGLE_REDIRECT_URI?: string;
-  LINE_CLIENT_ID?: string;
-  LINE_CLIENT_SECRET?: string;
-  LINE_REDIRECT_URI?: string;
+  
+  // OAuth 2.1 (MCP Server)
+  MCP_SERVER_URL: string;
+  OAUTH_CLIENT_ID: string;
+  OAUTH_CLIENT_SECRET?: string;
+  OAUTH_REDIRECT_URI: string;
+  OAUTH_SCOPE?: string;
+  
+  // Frontend
   FRONTEND_URL?: string;
-  MCP_SERVER_URL?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -41,6 +48,12 @@ app.get('/', (c) => {
       api: '/api',
       auth: '/auth',
       health: '/api/health'
+    },
+    oauth: {
+      login: '/auth/login',
+      callback: '/auth/callback',
+      status: '/auth/status',
+      logout: '/auth/logout'
     }
   });
 });
@@ -48,3 +61,4 @@ app.get('/', (c) => {
 export default {
   fetch: app.fetch,
 };
+

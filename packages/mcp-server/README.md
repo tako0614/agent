@@ -1,95 +1,204 @@
-# MCP Server
+# MCP Server - OAuth 2.1 Standard Implementation
 
-Independent MCP (Model Context Protocol) tool API server.
+**標準的なMCP OAuth 2.1認証を実装したModel Context Protocolサーバーです。**
 
-## Overview
+## 🌟 Overview
 
-The MCP Server provides business tools and APIs that can be accessed:
-- By the AI Service via token-based authentication (for end users)
-- By administrators via Google OAuth (for direct management)
+このMCPサーバーは、MCP公式仕様に準拠した**OAuth 2.1認証**を実装しています:
 
-## Features
+- ✅ **RFC 9728**: Protected Resource Metadata (PRM)
+- ✅ **RFC 8414**: Authorization Server Metadata
+- ✅ **RFC 8707**: Resource Indicators
+- ✅ **RFC 7636**: PKCE (Proof Key for Code Exchange)
+- ✅ **RFC 7591**: Dynamic Client Registration (DCR)
 
-- 🔐 **Dual Authentication**: AI Service tokens + Google OAuth
-- 🛠️ **Business Tools**: Booking, Product, Order, Form management
-- 🌐 **REST API**: Public API endpoints
-- 🔒 **Scope-based Access Control**: Fine-grained permissions
-- 📊 **Admin Dashboard**: Direct tool management
+## 🏗️ Features
 
-## Architecture
+- 🔐 **標準OAuth 2.1認証**: Authorization Code + PKCE フロー
+- 🎫 **JWT アクセストークン**: 業界標準のBearer認証
+- 👤 **独立したユーザー管理**: MCPサーバー独自のアカウントシステム
+- 🔑 **Google OAuth統合**: シンプルなユーザー認証
+- � **401 + WWW-Authenticate**: 標準的なエラーレスポンス
+- �🛠️ **Business Tools**: Booking, Product, Order, Form management
+- 🌐 **REST API**: 標準的なHTTP API
+- 🔒 **スコープベースのアクセス制御**: 細かい権限管理
 
-```
-AI Service (localhost:8787)
-  → Generates JWT Token
-    → MCP Server (localhost:8788)
-      → Verifies Token
-        → Executes Tools
-          → Database Operations
-```
+## 🚀 Quick Start
 
-## Development
+詳細なセットアップは [SETUP_OAUTH.md](./SETUP_OAUTH.md) を参照してください。
 
 ```bash
-# Install dependencies
-npm install
-
-# Copy environment variables
+# 1. 環境変数の設定
 cp .dev.vars.example .dev.vars
-# Edit .dev.vars with your credentials
+# .dev.vars を編集
 
-# Start development server
+# 2. データベースマイグレーション
+cd ../database
+npx prisma migrate dev
+npx prisma generate
+
+# 3. サーバー起動
+cd ../mcp-server
 npm run dev
-# Server runs on http://localhost:8788
 ```
 
-## API Endpoints
+サーバーは `http://localhost:8788` で起動します。
 
-### Authentication
-- `GET /auth/login/google` - Administrator login
-- `GET /auth/callback/google` - OAuth callback
-- `POST /auth/verify-token` - Verify AI Service token
+## 📡 OAuth 2.1 Endpoints
 
-### MCP Tools
-- `GET /mcp` - API overview
-- `GET /mcp/tools` - Available tools list
+### メタデータエンドポイント
 
-#### Booking
-- `GET /mcp/tools/booking/available-slots` - Check available slots
-- `POST /mcp/tools/booking/create` - Create booking
-- `POST /mcp/tools/booking/service/create` - [Admin] Create service
+| エンドポイント | 説明 |
+|--------------|------|
+| `GET /.well-known/oauth-authorization-server` | Authorization Server Metadata (RFC 8414) |
+| `GET /.well-known/oauth-protected-resource` | Protected Resource Metadata (RFC 9728) |
 
-#### Product
-- `GET /mcp/tools/product/search` - Search products
-- `GET /mcp/tools/product/:id` - Get product details
-- `POST /mcp/tools/product/create` - [Admin] Create product
+### 認可フローエンドポイント
 
-#### Order
-- `POST /mcp/tools/order/create` - Create order
-- `GET /mcp/tools/order/:id` - Get order details
-- `GET /mcp/tools/order/list` - [Admin] List all orders
+| エンドポイント | 説明 |
+|--------------|------|
+| `POST /oauth/register` | Dynamic Client Registration (RFC 7591) |
+| `GET /oauth/authorize` | 認可リクエスト (Authorization Code + PKCE) |
+| `POST /oauth/token` | トークン取得・リフレッシュ |
+| `GET /oauth/jwks` | JSON Web Key Set (JWT検証用) |
 
-#### Form
-- `GET /mcp/tools/form/:id` - Get form
-- `POST /mcp/tools/form/:id/submit` - Submit form
-- `POST /mcp/tools/form/create` - [Admin] Create form
+### ユーザー認証エンドポイント
 
-## Deployment
+| エンドポイント | 説明 |
+|--------------|------|
+| `GET /auth/login/google` | Google OAuth ログイン |
+| `GET /auth/callback/google` | Google OAuth コールバック |
+| `GET /auth/me` | 現在のユーザー情報 |
+| `POST /auth/logout` | ログアウト |
+
+### MCP Tools (認証必須)
+
+| エンドポイント | 説明 |
+|--------------|------|
+| `GET /mcp` | API概要 |
+| `GET /mcp/tools` | 利用可能なツール一覧 |
+| `GET /mcp/tools/booking/*` | 予約管理 |
+| `GET /mcp/tools/product/*` | 商品管理 |
+| `GET /mcp/tools/order/*` | 注文管理 |
+| `GET /mcp/tools/form/*` | フォーム管理 |
+
+## 🔒 Authentication Flow
+
+```
+┌──────────────┐                                   ┌──────────────┐
+│ MCP Client   │                                   │ MCP Server   │
+│ (Claude etc.)│                                   │              │
+└──────┬───────┘                                   └──────┬───────┘
+       │                                                  │
+       │ 1. GET /.well-known/oauth-protected-resource   │
+       │ ──────────────────────────────────────────────>│
+       │                                                  │
+       │ 2. WWW-Authenticate: Bearer resource_metadata= │
+       │ <──────────────────────────────────────────────│
+       │                                                  │
+       │ 3. GET /.well-known/oauth-authorization-server │
+       │ ──────────────────────────────────────────────>│
+       │                                                  │
+       │ 4. Authorization Server Metadata                │
+       │ <──────────────────────────────────────────────│
+       │                                                  │
+       │ 5. POST /oauth/register (DCR)                   │
+       │ ──────────────────────────────────────────────>│
+       │                                                  │
+       │ 6. Client Credentials                           │
+       │ <──────────────────────────────────────────────│
+       │                                                  │
+       │ 7. GET /oauth/authorize + PKCE challenge        │
+       │ ──────────────────────────────────────────────>│
+       │                                                  │
+       │          ┌───────────────┐                      │
+       │          │ Google OAuth  │                      │
+       │          │ Login         │                      │
+       │          └───────────────┘                      │
+       │                                                  │
+       │ 8. Authorization Code                           │
+       │ <──────────────────────────────────────────────│
+       │                                                  │
+       │ 9. POST /oauth/token + code_verifier            │
+       │ ──────────────────────────────────────────────>│
+       │                                                  │
+       │ 10. Access Token (JWT) + Refresh Token          │
+       │ <──────────────────────────────────────────────│
+       │                                                  │
+       │ 11. GET /mcp/tools/booking                      │
+       │     Authorization: Bearer <JWT>                 │
+       │ ──────────────────────────────────────────────>│
+       │                                                  │
+       │ 12. API Response                                │
+       │ <──────────────────────────────────────────────│
+       │                                                  │
+```
+
+## 🔑 Scopes
+
+| スコープ | 説明 |
+|---------|------|
+| `booking:read` | 予約情報の読み取り |
+| `booking:write` | 予約の作成・更新・削除 |
+| `product:read` | 商品情報の読み取り |
+| `product:write` | 商品の作成・更新・削除 |
+| `order:read` | 注文情報の読み取り |
+| `order:write` | 注文の作成・更新 |
+| `form:read` | フォーム情報の読み取り |
+| `form:write` | フォームの作成・投稿 |
+
+## 🧪 Testing
+
+### 1. メタデータの確認
 
 ```bash
-# Set secrets
+curl http://localhost:8788/.well-known/oauth-authorization-server | jq
+curl http://localhost:8788/.well-known/oauth-protected-resource | jq
+```
+
+### 2. 401レスポンスの確認
+
+```bash
+curl -v http://localhost:8788/mcp/tools/booking
+```
+
+WWW-Authenticateヘッダが返されることを確認。
+
+### 3. OAuth 2.1 フルフロー
+
+[SETUP_OAUTH.md](./SETUP_OAUTH.md) の「OAuth 2.1フローのテスト」セクションを参照。
+
+## 📚 Documentation
+
+- **[SETUP_OAUTH.md](./SETUP_OAUTH.md)** - 詳細なセットアップガイド
+- **[README_OAUTH.md](./README_OAUTH.md)** - OAuth 2.1 API仕様
+- [MCP Official Docs](https://modelcontextprotocol.io/docs/specification/authentication) - MCP公式認証仕様
+
+## 🚀 Deployment
+
+### Cloudflare Workers
+
+```bash
+# Secretsの設定
+wrangler secret put JWT_SECRET
 wrangler secret put MCP_GOOGLE_CLIENT_SECRET
-wrangler secret put AI_SERVICE_PUBLIC_KEY
 wrangler secret put DATABASE_URL
 
-# Deploy to Cloudflare Workers
+# デプロイ
 npm run deploy
 ```
 
-## Environment Variables
+## 🔐 Security
 
-See `.dev.vars.example` for required environment variables.
+- ✅ PKCE (S256) 必須
+- ✅ JWT 署名検証
+- ✅ トークン有効期限チェック
+- ✅ Redirect URI 検証
+- ⚠️ 本番環境では強力なJWT_SECRETを設定
+- ⚠️ 本番環境ではHTTPSを使用
+- ⚠️ 本番環境ではRS256 (RSA署名) を推奨
 
-## Documentation
+## 📝 License
 
-- [MCP Authentication Guide](../../docs/guides/MCP_AUTH.md)
-- [Separation Architecture](../../docs/architecture/SEPARATION_ARCHITECTURE.md)
+MIT
+

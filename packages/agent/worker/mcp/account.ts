@@ -56,11 +56,14 @@ app.post('/register', publicEndpoint, async (c) => {
     createdAt: new Date().toISOString()
   };
 
-  // Create session for new user
-  const authService = createAuthService({});
-  const sessionToken = authService.createSessionToken(mockUser);
-
-  // Set session cookie
+  // Note: OAuth 2.1 flow should be used instead of direct registration
+  // This endpoint is deprecated and should redirect to OAuth flow
+  
+  // Redirect to OAuth login instead
+  return c.redirect('/auth/login');
+  
+  /*
+  // Old session-based code removed
   setCookie(c, 'session', sessionToken, {
     httpOnly: true,
     secure: true,
@@ -77,6 +80,7 @@ app.post('/register', publicEndpoint, async (c) => {
       message: 'Account created successfully'
     }
   });
+  */
 });
 
 /**
@@ -95,16 +99,18 @@ app.get('/me', requireAuth, async (c) => {
   //   where: { id: userId }
   // });
 
+  // Note: OAuth 2.1 tokens should be used instead
+  // This code is deprecated
   const sessionToken = getCookie(c, 'session');
-  const authService = createAuthService({});
-  const session = authService.validateSessionToken(sessionToken || '');
+  // const authService = createAuthService({...});
+  // const session = authService.validateSessionToken(sessionToken || '');
 
   const mockUser = {
     id: userId,
-    email: session?.email || 'user@example.com',
-    name: session?.name || 'User Name',
-    provider: session?.provider || 'email',
-    picture: session?.picture,
+    email: 'user@example.com',
+    name: 'User Name',
+    provider: 'email',
+    picture: undefined,
     createdAt: new Date().toISOString()
   };
 
@@ -210,27 +216,15 @@ app.post('/login', publicEndpoint, async (c) => {
     picture: undefined,
   };
 
-  // Create session
+  // Note: OAuth 2.1 flow should be used instead
+  // This endpoint is deprecated and should redirect to OAuth flow
+  return c.redirect('/auth/login');
+  
+  /*
+  // Old code removed - use OAuth 2.1 flow at /auth/login
   const authService = createAuthService({});
   const sessionToken = authService.createSessionToken(mockUser);
-
-  // Set session cookie
-  setCookie(c, 'session', sessionToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'Lax',
-    maxAge: 7 * 24 * 60 * 60, // 7 days
-    path: '/',
-  });
-
-  return c.json({
-    success: true,
-    data: {
-      user: mockUser,
-      sessionToken,
-      message: 'Login successful'
-    }
-  });
+  */
 });
 
 /**

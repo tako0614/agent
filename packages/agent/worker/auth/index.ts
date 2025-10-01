@@ -1,225 +1,176 @@
-import { Google, Line } from 'arctic';
+/**
+ * Authentication Service for Agent App
+ * Uses MCP Server OAuth 2.1 for authentication
+ */
 
-export interface OAuthProvider {
-  createAuthorizationURL(state: string): Promise<URL>;
-  validateAuthorizationCode(code: string): Promise<any>;
-}
+import { OAuthClient } from './oauth-client';
+import { generateCodeVerifier, generateCodeChallenge, generateState } from './pkce';
+import { 
+  storeTokens, 
+  getTokens, 
+  clearTokens, 
+  storeCodeVerifier, 
+  getAndDeleteCodeVerifier,
+  storeState,
+  getAndDeleteState,
+  TokenSet 
+} from './token-manager';
+import { Context } from 'hono';
 
 export interface UserInfo {
   id: string;
   email: string;
   name: string;
   picture?: string;
-  provider: 'google' | 'line' | 'email';
+}
+
+export interface AuthServiceConfig {
+  mcpServerUrl: string;
+  clientId: string;
+  clientSecret?: string;
+  redirectUri: string;
+  scope?: string[];
 }
 
 export class AuthService {
-  private google: Google | null = null;
-  private line: Line | null = null;
+  private oauthClient: OAuthClient;
+  private config: AuthServiceConfig;
 
-  constructor(config: {
-    googleClientId?: string;
-    googleClientSecret?: string;
-    googleRedirectUri?: string;
-    lineClientId?: string;
-    lineClientSecret?: string;
-    lineRedirectUri?: string;
-  }) {
-    // Initialize Google OAuth
-    if (config.googleClientId && config.googleClientSecret && config.googleRedirectUri) {
-      this.google = new Google(
-        config.googleClientId,
-        config.googleClientSecret,
-        config.googleRedirectUri
-      );
-    }
-
-    // Initialize LINE OAuth
-    if (config.lineClientId && config.lineClientSecret && config.lineRedirectUri) {
-      this.line = new Line(
-        config.lineClientId,
-        config.lineClientSecret,
-        config.lineRedirectUri
-      );
-    }
-  }
-
-  /**
-   * Generate authorization URL for Google
-   */
-  async createGoogleAuthorizationURL(state: string, codeVerifier: string): Promise<URL> {
-    if (!this.google) {
-      throw new Error('Google OAuth is not configured');
-    }
-
-    const scopes = ['openid', 'profile', 'email'];
-    return await this.google.createAuthorizationURL(state, codeVerifier, scopes);
-  }
-
-  /**
-   * Generate authorization URL for LINE
-   */
-  async createLINEAuthorizationURL(state: string, codeVerifier: string): Promise<URL> {
-    if (!this.line) {
-      throw new Error('LINE OAuth is not configured');
-    }
-
-    const scopes = ['profile', 'openid', 'email'];
-    return await this.line.createAuthorizationURL(state, codeVerifier, scopes);
-  }
-
-  /**
-   * Validate Google authorization code and get user info
-   */
-  async validateGoogleCode(code: string, codeVerifier: string): Promise<UserInfo> {
-    if (!this.google) {
-      throw new Error('Google OAuth is not configured');
-    }
-
-    const tokens = await this.google.validateAuthorizationCode(code, codeVerifier);
-    
-    // Get user info from Google
-    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: {
-        Authorization: `Bearer ${tokens.accessToken()}`
-      }
+  constructor(config: AuthServiceConfig) {
+    this.config = config;
+    this.oauthClient = new OAuthClient({
+      authorizationEndpoint: `${config.mcpServerUrl}/oauth/authorize`,
+      tokenEndpoint: `${config.mcpServerUrl}/oauth/token`,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      redirectUri: config.redirectUri,
+      scope: config.scope,
     });
+  }
 
-    if (!response.ok) {
-      throw new Error('Failed to get user info from Google');
+  /**
+   * Start OAuth 2.1 authorization flow
+   * Returns authorization URL to redirect user to
+   */
+  async startAuthorizationFlow(c: Context): Promise<URL> {
+    // Generate PKCE parameters
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = generateCodeChallenge(codeVerifier);
+    const state = generateState();
+
+    // Store PKCE parameters in cookies
+    storeCodeVerifier(c, codeVerifier);
+    storeState(c, state);
+
+    // Build authorization URL
+    return this.oauthClient.buildAuthorizationUrl(
+      codeChallenge,
+      state,
+      this.config.scope
+    );
+  }
+
+  /**
+   * Handle OAuth callback
+   * Exchange authorization code for tokens
+   */
+  async handleCallback(
+    c: Context,
+    code: string,
+    state: string
+  ): Promise<TokenSet> {
+    // Verify state parameter (CSRF protection)
+    const storedState = getAndDeleteState(c);
+    if (!storedState || storedState !== state) {
+      throw new Error('Invalid state parameter');
     }
 
-    const googleUser = await response.json() as {
-      id: string;
-      email: string;
-      name: string;
-      picture?: string;
-    };
+    // Get code verifier
+    const codeVerifier = getAndDeleteCodeVerifier(c);
+    if (!codeVerifier) {
+      throw new Error('Code verifier not found');
+    }
+
+    // Exchange code for tokens
+    const tokens = await this.oauthClient.exchangeCode(code, codeVerifier);
+
+    // Store tokens in cookies
+    storeTokens(c, tokens);
 
     return {
-      id: googleUser.id,
-      email: googleUser.email,
-      name: googleUser.name,
-      picture: googleUser.picture,
-      provider: 'google'
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: Date.now() + tokens.expires_in * 1000,
+      scope: tokens.scope ? tokens.scope.split(' ') : undefined,
     };
   }
 
   /**
-   * Validate LINE authorization code and get user info
+   * Refresh access token
    */
-  async validateLINECode(code: string, codeVerifier: string): Promise<UserInfo> {
-    if (!this.line) {
-      throw new Error('LINE OAuth is not configured');
+  async refreshAccessToken(c: Context): Promise<TokenSet> {
+    const tokens = getTokens(c);
+    if (!tokens || !tokens.refreshToken) {
+      throw new Error('No refresh token available');
     }
 
-    const tokens = await this.line.validateAuthorizationCode(code, codeVerifier);
-    
-    // Get user info from LINE
-    const response = await fetch('https://api.line.me/v2/profile', {
-      headers: {
-        Authorization: `Bearer ${tokens.accessToken()}`
-      }
-    });
+    const newTokens = await this.oauthClient.refreshToken(tokens.refreshToken);
 
-    if (!response.ok) {
-      throw new Error('Failed to get user info from LINE');
-    }
-
-    const lineUser = await response.json() as {
-      userId: string;
-      displayName: string;
-      pictureUrl?: string;
-    };
-
-    // LINE doesn't provide email in profile API, need to use id token
-    let email = '';
-    const idToken = tokens.idToken();
-    if (idToken) {
-      try {
-        // Decode ID token to get email
-        const payload = JSON.parse(
-          atob(idToken.split('.')[1])
-        );
-        email = payload.email || '';
-      } catch (e) {
-        console.error('Failed to decode LINE ID token:', e);
-      }
-    }
+    // Store new tokens
+    storeTokens(c, newTokens);
 
     return {
-      id: lineUser.userId,
-      email,
-      name: lineUser.displayName,
-      picture: lineUser.pictureUrl,
-      provider: 'line'
+      accessToken: newTokens.access_token,
+      refreshToken: newTokens.refresh_token,
+      expiresAt: Date.now() + newTokens.expires_in * 1000,
+      scope: newTokens.scope ? newTokens.scope.split(' ') : undefined,
     };
   }
 
   /**
-   * Generate a random state for OAuth
+   * Get current tokens
    */
-  generateState(): string {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+  getTokens(c: Context): TokenSet | null {
+    return getTokens(c);
   }
 
   /**
-   * Generate a code verifier for PKCE
+   * Logout user
    */
-  generateCodeVerifier(): string {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+  logout(c: Context): void {
+    clearTokens(c);
   }
 
   /**
-   * Create a session token
+   * Check if user is authenticated
    */
-  createSessionToken(userInfo: UserInfo): string {
-    const payload = {
-      userId: userInfo.id,
-      email: userInfo.email,
-      name: userInfo.name,
-      picture: userInfo.picture,
-      provider: userInfo.provider,
-      exp: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
-    };
-    return btoa(JSON.stringify(payload));
-  }
-
-  /**
-   * Validate session token
-   */
-  validateSessionToken(token: string): UserInfo | null {
-    try {
-      const payload = JSON.parse(atob(token));
-      
-      if (payload.exp < Date.now()) {
-        return null; // Token expired
-      }
-
-      return {
-        id: payload.userId,
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-        provider: payload.provider
-      };
-    } catch {
-      return null;
-    }
+  isAuthenticated(c: Context): boolean {
+    const tokens = getTokens(c);
+    return tokens !== null && Date.now() < tokens.expiresAt;
   }
 }
 
-export function createAuthService(config: {
-  googleClientId?: string;
-  googleClientSecret?: string;
-  googleRedirectUri?: string;
-  lineClientId?: string;
-  lineClientSecret?: string;
-  lineRedirectUri?: string;
+/**
+ * Create auth service from environment variables
+ */
+export function createAuthService(env: {
+  MCP_SERVER_URL: string;
+  OAUTH_CLIENT_ID: string;
+  OAUTH_CLIENT_SECRET?: string;
+  OAUTH_REDIRECT_URI: string;
+  OAUTH_SCOPE?: string;
 }): AuthService {
-  return new AuthService(config);
+  return new AuthService({
+    mcpServerUrl: env.MCP_SERVER_URL,
+    clientId: env.OAUTH_CLIENT_ID,
+    clientSecret: env.OAUTH_CLIENT_SECRET,
+    redirectUri: env.OAUTH_REDIRECT_URI,
+    scope: env.OAUTH_SCOPE ? env.OAUTH_SCOPE.split(' ') : undefined,
+  });
 }
+
+// Export all auth utilities
+export * from './oauth-client';
+export * from './pkce';
+export * from './token-manager';
+
