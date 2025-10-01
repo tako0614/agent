@@ -1,10 +1,15 @@
 // Type definitions for the application
 
+export type AgentMode = 'chat' | 'agent' | 'auto';
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: string;
+  mode?: AgentMode;
+  planSteps?: string[];
+  currentStep?: number;
 }
 
 export interface Conversation {

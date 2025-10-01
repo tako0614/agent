@@ -1,0 +1,14 @@
+{
+  "name": "agent-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:agent": "npm run dev --workspace=packages/agent",
+    "dev:mcp": "npm run dev --workspace=packages/mcp-server",
+    "build": "npm run build --workspaces",
+    "db:generate": "npm run db:generate --workspace=packages/database"
+  }
+}

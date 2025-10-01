@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { createAIAgent } from '../ai';
 import { executeToolCall } from '../ai/tools';
+import { determineMode, executeChatMode, executeAgentMode } from '../ai/modes';
+import type { AgentMode } from '../ai/modes';
 import account from './account';
 import { createPaymentService } from '../payment';
 
@@ -45,6 +47,7 @@ app.post('/conversations/:id/messages', async (c) => {
   const body = await c.req.json() as {
     content: string;
     history?: Array<{ role: string; content: string }>;
+    mode?: AgentMode;
   };
   
   const apiKey = c.env.OPENAI_API_KEY;
@@ -53,43 +56,53 @@ app.post('/conversations/:id/messages', async (c) => {
   }
   
   try {
-    const agent = createAIAgent(apiKey);
     const conversationHistory = body.history || [];
+    let mode = body.mode || 'auto';
     
-    const result = await agent.processMessage(conversationHistory, body.content);
+    // Auto mode: determine the appropriate mode
+    if (mode === 'auto') {
+      mode = await determineMode(body.content, apiKey);
+      console.log('[Auto Mode] Determined mode:', mode);
+    }
     
-    // If there's a tool call, execute it
-    if (result.toolCall) {
-      const toolResult = await executeToolCall(c, result.toolCall);
-      
-      // Process the tool result with the agent
-      const followUp = await agent.processMessage(
-        [
-          ...conversationHistory,
-          { role: 'user', content: body.content },
-          { role: 'assistant', content: result.response },
-        ],
-        `ツール実行結果: ${JSON.stringify(toolResult)}`
+    // Execute based on mode
+    if (mode === 'agent') {
+      // Agent mode: create plan and execute
+      const result = await executeAgentMode(
+        body.content,
+        conversationHistory,
+        apiKey,
+        (toolCall) => executeToolCall(c, toolCall)
       );
       
       return c.json({
         id: 'msg_' + Date.now(),
         conversationId,
         role: 'assistant',
-        content: followUp.response,
-        toolCall: result.toolCall,
-        toolResult,
+        content: result.response,
+        mode: 'agent',
+        planSteps: result.planSteps,
+        currentStep: result.currentStep,
+        toolCalls: result.toolCalls,
+        createdAt: new Date().toISOString()
+      });
+    } else {
+      // Chat mode: simple conversation
+      const response = await executeChatMode(
+        body.content,
+        conversationHistory,
+        apiKey
+      );
+      
+      return c.json({
+        id: 'msg_' + Date.now(),
+        conversationId,
+        role: 'assistant',
+        content: response,
+        mode: 'chat',
         createdAt: new Date().toISOString()
       });
     }
-    
-    return c.json({
-      id: 'msg_' + Date.now(),
-      conversationId,
-      role: 'assistant',
-      content: result.response,
-      createdAt: new Date().toISOString()
-    });
   } catch (error) {
     console.error('Error processing message:', error);
     return c.json({

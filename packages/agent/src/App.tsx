@@ -4,11 +4,13 @@ import { ChatInput } from './components/ChatInput';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { LoginButton } from './components/LoginButton';
 import { UserProfile } from './components/UserProfile';
+import { ModeSelector } from './components/ModeSelector';
 import { AuthProvider, useAuth } from './utils/auth';
-import type { Message } from './types';
+import type { Message, AgentMode } from './types';
 
 const ChatApp: Component = () => {
   const { isAuthenticated, isLoading } = useAuth();
+  const [mode, setMode] = createSignal<AgentMode>('auto');
   const [messages, setMessages] = createSignal<Message[]>([
     {
       id: '1',
@@ -24,11 +26,14 @@ const ChatApp: Component = () => {
   });
 
   const handleSendMessage = async (text: string) => {
+    const currentMode = mode();
+    
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
       role: 'user',
       content: text,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      mode: currentMode,
     };
 
     setMessages([...messages(), userMessage]);
@@ -48,7 +53,8 @@ const ChatApp: Component = () => {
         credentials: 'include', // Include auth cookies
         body: JSON.stringify({
           content: text,
-          history
+          history,
+          mode: currentMode, // Send current mode to backend
         })
       });
 
@@ -60,6 +66,9 @@ const ChatApp: Component = () => {
         id: string;
         content: string;
         createdAt: string;
+        mode?: AgentMode;
+        planSteps?: string[];
+        currentStep?: number;
         toolCall?: { name: string; params: any };
         toolResult?: any;
       };
@@ -75,7 +84,10 @@ const ChatApp: Component = () => {
         id: data.id,
         role: 'assistant',
         content: assistantContent,
-        createdAt: data.createdAt
+        createdAt: data.createdAt,
+        mode: data.mode || currentMode,
+        planSteps: data.planSteps,
+        currentStep: data.currentStep,
       };
 
       setMessages([...messages(), assistantMessage]);
@@ -111,8 +123,20 @@ const ChatApp: Component = () => {
           <header class="bg-white border-b border-gray-200">
             <UserProfile />
             <div class="px-6 py-4">
-              <h1 class="text-2xl font-bold text-gray-900">AI Service Builder</h1>
-              <p class="text-sm text-gray-600">AIでネットサービスを簡単に作成・操作</p>
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <h1 class="text-2xl font-bold text-gray-900">AI Service Builder</h1>
+                  <p class="text-sm text-gray-600">AIでネットサービスを簡単に作成・操作</p>
+                </div>
+                <ModeSelector currentMode={mode()} onModeChange={setMode} />
+              </div>
+              
+              {/* Mode description */}
+              <div class="text-xs text-gray-500 bg-gray-50 rounded p-2">
+                {mode() === 'chat' && '💬 シンプルな質問応答モード'}
+                {mode() === 'agent' && '🤖 自律型AIエージェント - タスクを計画的に実行します'}
+                {mode() === 'auto' && '✨ 自動切り替え - 状況に応じて最適なモードを選択します'}
+              </div>
             </div>
           </header>
 
@@ -125,6 +149,9 @@ const ChatApp: Component = () => {
                     role={message.role}
                     content={message.content}
                     timestamp={message.createdAt}
+                    mode={message.mode}
+                    planSteps={message.planSteps}
+                    currentStep={message.currentStep}
                   />
                 )}
               </For>
