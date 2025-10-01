@@ -2,11 +2,10 @@ import { Hono } from 'hono';
 
 import { publicEndpoint, requireAuth, requireAdmin, getCurrentUserId } from './middleware';
 
-import accountRouter from './account';const app = new Hono();
+import accountRouter from './account';
 
 
-
-type Bindings = {export default app;
+type Bindings = {
 
   MCP_API_KEY?: string;
   DATABASE_URL?: string;

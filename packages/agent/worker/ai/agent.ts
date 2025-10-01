@@ -118,7 +118,7 @@ const FormToolSchema = z.object({
 });
 
 // Available tools configuration
-const tools = [
+export const tools = [
   {
     name: 'booking_tool',
     description: `予約システムを操作します。
@@ -182,6 +182,10 @@ const tools = [
   },
 ];
 
+const toolPrompt = tools
+  .map((tool) => `- ${tool.name}:\n${tool.description}`)
+  .join('\n\n');
+
 export class AIAgent {
   private model: ChatOpenAI;
   private graph: any;
@@ -218,32 +222,28 @@ export class AIAgent {
       },
     });
 
-    // Add nodes
-    workflow.addNode('agent', this.agentNode.bind(this));
-    workflow.addNode('tools', this.toolsNode.bind(this));
+    const graph = workflow
+      .addNode('agent', this.agentNode.bind(this))
+      .addNode('tools', this.toolsNode.bind(this))
+      .addEdge(START, 'agent')
+      .addConditionalEdges(
+        'agent',
+        this.shouldContinue.bind(this),
+        {
+          continue: 'tools',
+          end: END,
+        }
+      )
+      .addEdge('tools', 'agent')
+      .compile();
 
-    // Add edges
-    workflow.addEdge(START, 'agent');
-    workflow.addConditionalEdges(
-      'agent',
-      this.shouldContinue.bind(this),
-      {
-        continue: 'tools',
-        end: END,
-      }
-    );
-    workflow.addEdge('tools', 'agent');
-
-    return workflow.compile();
+    return graph;
   }
 
   private async agentNode(state: AgentState): Promise<Partial<AgentState>> {
     const systemPrompt = `あなたは万能AIエージェントです。ユーザーの要求に応じて、以下のツールを使用してサービスを提供します:
 
-1. booking_tool: 予約システム(予約作成、一覧、キャンセル)
-2. product_tool: 商品カタログ(検索、一覧、詳細)
-3. order_tool: 注文管理(注文作成、一覧、ステータス)
-4. form_tool: フォーム管理(作成、送信、一覧)
+${toolPrompt}
 
 ユーザーの要求を理解し、適切なツールを選択して実行してください。
 ツールを使う必要がある場合は、tool_call形式で応答してください。
@@ -271,7 +271,7 @@ export class AIAgent {
     if (toolCallMatch) {
       const [, toolName, paramsStr] = toolCallMatch;
       try {
-        const params = JSON.parse(paramsStr || '{}');
+        JSON.parse(paramsStr || '{}');
         return {
           currentTool: toolName,
           nextAction: 'continue',
@@ -350,13 +350,10 @@ export class AIAgent {
   async streamResponse(
     conversationHistory: Array<{ role: string; content: string }>,
     userMessage: string
-  ): Promise<ReadableStream> {
+  ): Promise<ReadableStream<Uint8Array>> {
     const systemPrompt = `あなたは万能AIエージェントです。ユーザーの要求に応じて、以下のツールを使用してサービスを提供します:
 
-1. booking_tool: 予約システム(予約作成、一覧、キャンセル)
-2. product_tool: 商品カタログ(検索、一覧、詳細)
-3. order_tool: 注文管理(注文作成、一覧、ステータス)
-4. form_tool: フォーム管理(作成、送信、一覧)
+${toolPrompt}
 
 ユーザーと自然に会話し、必要に応じてツールを使用してください。`;
 
@@ -367,14 +364,16 @@ export class AIAgent {
     ];
 
     const stream = await this.model.stream(messages as any);
+    const encoder = new TextEncoder();
+    const toText = this.toText.bind(this);
 
-    return new ReadableStream({
+    return new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
           for await (const chunk of stream) {
-            const content = this.toText(chunk?.content);
+            const content = toText(chunk?.content);
             if (content) {
-              controller.enqueue(new TextEncoder().encode(content));
+              controller.enqueue(encoder.encode(content));
             }
           }
           controller.close();
