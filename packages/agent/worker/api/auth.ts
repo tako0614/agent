@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { createAuthService } from '../auth';
+import { generateMcpToken } from '../auth/mcp-token';
 
 type Bindings = {
   GOOGLE_CLIENT_ID?: string;
@@ -10,6 +11,7 @@ type Bindings = {
   LINE_CLIENT_SECRET?: string;
   LINE_REDIRECT_URI?: string;
   FRONTEND_URL?: string;
+  MCP_PRIVATE_KEY?: string; // RSA private key for signing MCP tokens
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -298,6 +300,52 @@ app.get('/me', async (c) => {
     picture: userInfo.picture,
     provider: userInfo.provider
   });
+});
+
+/**
+ * Generate MCP access token for authenticated user
+ * This token can be used to access MCP Server tools
+ */
+app.post('/mcp-token', async (c) => {
+  const sessionToken = getCookie(c, 'session');
+
+  if (!sessionToken) {
+    return c.json({ error: 'Not authenticated' }, 401);
+  }
+
+  const authService = createAuthService({});
+  const userInfo = authService.validateSessionToken(sessionToken);
+
+  if (!userInfo) {
+    deleteCookie(c, 'session');
+    return c.json({ error: 'Invalid session' }, 401);
+  }
+
+  const privateKey = c.env.MCP_PRIVATE_KEY;
+  if (!privateKey) {
+    return c.json({ error: 'MCP token generation not configured' }, 500);
+  }
+
+  try {
+    const token = await generateMcpToken(
+      userInfo.id,
+      userInfo.email,
+      userInfo.name,
+      privateKey
+    );
+
+    return c.json({
+      token,
+      expiresIn: 3600, // 1 hour
+      tokenType: 'Bearer'
+    });
+  } catch (error) {
+    console.error('Error generating MCP token:', error);
+    return c.json({ 
+      error: 'Failed to generate MCP token',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
 });
 
 export default app;

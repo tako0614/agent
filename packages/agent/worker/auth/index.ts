@@ -81,7 +81,7 @@ export class AuthService {
     // Get user info from Google
     const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: {
-        Authorization: `Bearer ${tokens.accessToken}`
+        Authorization: `Bearer ${tokens.accessToken()}`
       }
     });
 

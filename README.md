@@ -37,17 +37,29 @@ AIでネットサービスを誰でも簡単に作れるプラットフォーム
 ```
 agent/
 ├── packages/
-│   ├── agent/           # フロントエンド + Worker
+│   ├── agent/           # フロントエンド + AI Service Worker
 │   │   ├── src/         # SolidJSフロントエンド
 │   │   │   ├── components/  # UIコンポーネント
 │   │   │   ├── pages/       # ページ
 │   │   │   ├── types/       # 型定義
 │   │   │   └── utils/       # ユーティリティ
-│   │   └── worker/      # Cloudflare Workers
-│   │       ├── ai/          # AIエージェント
+│   │   └── worker/      # AI Service (Cloudflare Workers)
+│   │       ├── ai/          # AIエージェント (LangGraph)
 │   │       ├── api/         # REST API
-│   │       ├── mcp/         # MCPツール
-│   │       └── payment/     # 決済処理
+│   │       ├── auth/        # Google/LINE OAuth & MCP トークン発行
+│   │       └── payment/     # 決済処理 (Stripe)
+│   │
+│   ├── mcp-server/      # MCP Server (新規・独立)
+│   │   └── worker/      # MCP Server Worker
+│   │       ├── auth/        # MCP独自認証 & トークン検証
+│   │       ├── mcp/         # MCPツール & ミドルウェア
+│   │       │   └── tools/   # 各種ツール実装
+│   │       │       ├── booking.ts  # 予約システム
+│   │       │       ├── product.ts  # 商品管理
+│   │       │       ├── order.ts    # 注文管理
+│   │       │       └── form.ts     # フォーム管理
+│   │       └── index.ts     # エントリーポイント
+│   │
 │   └── database/        # データベース層
 │       ├── prisma/      # Prismaスキーマ
 │       └── src/         # DBサービス
@@ -56,7 +68,7 @@ agent/
 │   ├── reports/         # 実装レポート
 │   ├── architecture/    # システム設計
 │   └── planning/        # 企画・要件
-└── package.json         # ルートパッケージ
+└── README.md            # このファイル
 ```
 
 ## 🚀 クイックスタート
@@ -95,9 +107,39 @@ OPENAI_API_KEY=sk-your-openai-api-key
 # Database URL
 DATABASE_URL="postgresql://user:password@localhost:5432/agent"
 
+# Google OAuth
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:8787/auth/callback/google
+
 # Stripe Keys (決済機能使用時)
 STRIPE_SECRET_KEY=sk_test_your-stripe-secret-key
 STRIPE_WEBHOOK_SECRET=whsec_your-webhook-secret
+
+# MCP Token Signing (RS256秘密鍵)
+# 生成方法: openssl genrsa -out private_key.pem 2048
+MCP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+
+# MCP Server URL
+MCP_SERVER_URL=http://localhost:8788
+```
+
+**MCPサーバー設定** (`packages/mcp-server/.dev.vars`):
+```env
+# Google OAuth for MCP Administrators
+MCP_GOOGLE_CLIENT_ID=your-google-client-id
+MCP_GOOGLE_CLIENT_SECRET=your-google-client-secret
+MCP_GOOGLE_REDIRECT_URI=http://localhost:8788/auth/callback/google
+
+# AI Service Public Key (RS256公開鍵)
+# 生成方法: openssl rsa -in private_key.pem -pubout -out public_key.pem
+AI_SERVICE_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+
+# Database URL
+DATABASE_URL="postgresql://user:password@localhost:5432/agent"
+
+# CORS設定
+ALLOWED_ORIGINS=http://localhost:8787,http://localhost:5173
 ```
 
 ### 3. データベースのセットアップ
@@ -116,13 +158,18 @@ npm run db:seed
 ### 4. 開発サーバーの起動
 
 ```powershell
-# 全サービス起動
+# AIサービスを起動 (ポート 8787)
+cd packages/agent
+npm run dev
+
+# 別のターミナルでMCPサーバーを起動 (ポート 8788)
+cd packages/mcp-server
 npm run dev
 ```
 
 これにより以下が起動します:
-- フロントエンド: http://localhost:8787
-- API: http://localhost:8787/api
+- AIサービス (フロントエンド + API): http://localhost:8787
+- MCPサーバー (ツールAPI): http://localhost:8788
 - Prisma Studio: http://localhost:5555 (別ターミナルで`npm run db:studio`)
 
 ### 5. ビルド
@@ -156,38 +203,68 @@ npm run deploy
 
 ## 🔌 主なAPIエンドポイント
 
-### AI Chat
+### AI Service (localhost:8787)
+
+#### Authentication
+- `GET /auth/login/google` - Google OAuth login
+- `GET /auth/login/line` - LINE OAuth login
+- `GET /auth/callback/google` - Google OAuth callback
+- `GET /auth/callback/line` - LINE OAuth callback
+- `GET /auth/me` - Get current user info
+- `POST /auth/mcp-token` - Generate MCP access token
+- `POST /auth/logout` - Logout
+
+#### AI Chat
 - `POST /api/conversations/:id/messages` - メッセージ送信
 - `POST /api/conversations/:id/messages/stream` - ストリーミングレスポンス
 
-### MCP Tools (利用者・管理者共通)
-- `GET /mcp` - API概要とドキュメント
+#### 決済
+- `POST /api/orders` - 注文作成
+- `POST /api/checkout/session` - Checkoutセッション作成
+- `POST /api/webhooks/stripe` - Stripeウェブフック
+
+### MCP Server (localhost:8788)
+
+#### Authentication
+- `GET /auth/login/google` - Administrator login (MCP管理者用)
+- `GET /auth/callback/google` - OAuth callback
+- `POST /auth/verify-token` - Verify AI Service token
+- `GET /auth/me` - Get current admin info
+
+#### MCP Tools
+- `GET /mcp` - API overview
 - `GET /mcp/tools` - 利用可能なツール一覧
 
 #### 予約システム
-- `GET /mcp/tools/booking/available-slots` - [利用者] 予約枠確認
+- `GET /mcp/tools/booking/available-slots` - [公開] 予約枠確認
 - `POST /mcp/tools/booking/create` - [利用者] 予約作成
+- `GET /mcp/tools/booking/:id` - [利用者] 予約詳細
+- `POST /mcp/tools/booking/:id/cancel` - [利用者] 予約キャンセル
 - `POST /mcp/tools/booking/service/create` - [管理者] サービス作成
+- `GET /mcp/tools/booking` - [管理者] 全予約一覧
 
 #### 商品管理
-- `GET /mcp/tools/product/search` - [利用者] 商品検索
-- `GET /mcp/tools/product/:id` - [利用者] 商品詳細
+- `GET /mcp/tools/product/search` - [公開] 商品検索
+- `GET /mcp/tools/product/:id` - [公開] 商品詳細
 - `POST /mcp/tools/product/create` - [管理者] 商品作成
+- `PUT /mcp/tools/product/:id` - [管理者] 商品更新
+- `DELETE /mcp/tools/product/:id` - [管理者] 商品削除
 
 #### 注文管理
 - `POST /mcp/tools/order/create` - [利用者] 注文作成
 - `GET /mcp/tools/order/:id` - [利用者] 注文確認
-- `GET /mcp/tools/order/list` - [管理者] 全注文確認
+- `GET /mcp/tools/order/user/history` - [利用者] 注文履歴
+- `POST /mcp/tools/order/:id/cancel` - [利用者] 注文キャンセル
+- `GET /mcp/tools/order` - [管理者] 全注文確認
+- `PUT /mcp/tools/order/:id/status` - [管理者] ステータス更新
 
 #### フォーム
-- `GET /mcp/tools/form/:id` - [利用者] フォーム表示
+- `GET /mcp/tools/form/:id` - [公開] フォーム表示
 - `POST /mcp/tools/form/:id/submit` - [利用者] フォーム送信
 - `POST /mcp/tools/form/create` - [管理者] フォーム作成
-
-### 決済
-- `POST /api/orders` - 注文作成
-- `POST /api/checkout/session` - Checkoutセッション作成
-- `POST /api/webhooks/stripe` - Stripeウェブフック
+- `PUT /mcp/tools/form/:id` - [管理者] フォーム更新
+- `GET /mcp/tools/form/:id/submissions` - [管理者] 回答一覧
+- `DELETE /mcp/tools/form/:id` - [管理者] フォーム削除
 
 ## 🤖 AIツール
 
@@ -247,8 +324,11 @@ npm run deploy           # Cloudflare Workersへデプロイ
 
 ## 🎯 次のステップ
 
-- [ ] データベースとの完全統合
-- [ ] ユーザー認証機能
+- [x] AIサービスとMCPサーバーの分離アーキテクチャ実装
+- [x] トークンベース認証システム (JWT with RS256)
+- [x] MCP独自Google OAuth for 管理者
+- [ ] データベースとの完全統合 (Prismaスキーマ更新)
+- [ ] AIエージェントからMCPサーバーへの連携
 - [ ] 管理画面の実装
 - [ ] ダッシュボード・分析機能
 - [ ] メール通知

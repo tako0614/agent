@@ -1,0 +1,13 @@
+name = "mcp-server"
+main = "worker/index.ts"
+compatibility_date = "2024-01-01"
+
+[observability]
+enabled = true
+
+# Environment variables (set with wrangler secret put)
+# MCP_GOOGLE_CLIENT_ID
+# MCP_GOOGLE_CLIENT_SECRET
+# MCP_GOOGLE_REDIRECT_URI
+# AI_SERVICE_PUBLIC_KEY
+# DATABASE_URL

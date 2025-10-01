@@ -14,10 +14,6 @@ STRIPE_SECRET_KEY=your-stripe-secret-key-here
 # Stripe Webhook Secret (for webhook verification)
 STRIPE_WEBHOOK_SECRET=your-stripe-webhook-secret-here
 
-# MCP API Key (optional - for protecting admin endpoints)
-# If not set, admin endpoints are accessible without authentication
-MCP_API_KEY=your-mcp-api-key-here
-
 # OAuth - Google
 # Get from https://console.cloud.google.com/apis/credentials
 GOOGLE_CLIENT_ID=your-google-client-id-here
@@ -32,3 +28,15 @@ LINE_REDIRECT_URI=http://localhost:8787/auth/callback/line
 
 # Frontend URL (for redirects after OAuth)
 FRONTEND_URL=http://localhost:5173
+
+# MCP Token Signing (RS256 Private Key in PEM format)
+# Generate key pair with:
+#   openssl genrsa -out private_key.pem 2048
+#   openssl rsa -in private_key.pem -pubout -out public_key.pem
+# Then paste the contents here (keep the BEGIN/END lines)
+MCP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+...your private key here...
+-----END RSA PRIVATE KEY-----"
+
+# MCP Server URL (for AI agent to call MCP tools)
+MCP_SERVER_URL=http://localhost:8788

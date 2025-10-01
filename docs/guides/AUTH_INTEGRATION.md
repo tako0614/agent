@@ -1,15 +1,42 @@
 # 認証システム統合ガイド
 
-このドキュメントでは、AI Service BuilderのOAuth認証システムの設定と使用方法について説明します。
+このドキュメントでは、AI Service BuilderのOAuth認証システム(AIサービス側)の設定と使用方法について説明します。
 
 ## 概要
 
-このプラットフォームは、以下のOAuthプロバイダーをサポートしています:
+AIサービスは、以下のOAuthプロバイダーをサポートしています:
 
 - **Google OAuth 2.0** - Googleアカウントでのログイン
 - **LINE Login** - LINEアカウントでのログイン
 
 認証システムは[Arctic](https://arctic.js.org/)ライブラリを使用して実装されており、Cloudflare Workers環境で動作します。
+
+**重要**: この認証システムは**AIサービス側のユーザー認証**のみを扱います。MCPサーバーは別の認証システムを持ちます。詳細は[MCP_AUTH.md](./MCP_AUTH.md)を参照してください。
+
+## アーキテクチャ
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  フロントエンド                                           │
+│  - LoginButton (Google/LINE)                            │
+│  - UserProfile                                          │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────┐
+│  AIサービス Workers                                      │
+│  - /auth/login/google                                   │
+│  - /auth/login/line                                     │
+│  - /auth/callback/google                                │
+│  - /auth/callback/line                                  │
+│  - セッション管理                                         │
+│  - MCPアクセストークン発行                                │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+                    ├─→ PostgreSQL (ユーザー情報保存)
+                    │
+                    └─→ MCPサーバー (トークン付きリクエスト)
+```
 
 ## セットアップ
 
@@ -65,15 +92,22 @@
 `.dev.vars`ファイルに以下の環境変数を追加:
 
 ```bash
-# Google OAuth
+# AIサービスのGoogle OAuth
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URI=http://localhost:8787/auth/callback/google
 
-# LINE Login
+# AIサービスのLINE Login
 LINE_CLIENT_ID=your-line-channel-id
 LINE_CLIENT_SECRET=your-line-channel-secret
 LINE_REDIRECT_URI=http://localhost:8787/auth/callback/line
+
+# MCPトークン用鍵ペア(AIサービスがMCPアクセストークンを発行するため)
+MCP_TOKEN_PRIVATE_KEY=your-private-key-for-signing
+MCP_TOKEN_PUBLIC_KEY=your-public-key-for-verification
+
+# MCPサーバーURL
+MCP_SERVER_URL=http://localhost:8788
 
 # Frontend URL
 FRONTEND_URL=http://localhost:5173
@@ -83,11 +117,15 @@ FRONTEND_URL=http://localhost:5173
 
 ```bash
 # Cloudflare Workers シークレットを設定
-wrangler secret put GOOGLE_CLIENT_ID
+cd packages/agent
 wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put LINE_CLIENT_ID
 wrangler secret put LINE_CLIENT_SECRET
+wrangler secret put MCP_TOKEN_PRIVATE_KEY
 ```
+
+**注意**: MCPサーバーとAIサービスの鍵ペアは共有されます:
+- AIサービス: `MCP_TOKEN_PRIVATE_KEY`で署名
+- MCPサーバー: `AI_SERVICE_PUBLIC_KEY`で検証
 
 ## 認証フロー
 
