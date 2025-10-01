@@ -1,4 +1,15 @@
 import { Context } from 'hono';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import {
+  AccountError,
+  extractSessionTokenFromAuthHeader,
+  getAccountProfile,
+  loginAccount,
+  logoutAccount,
+  registerAccount,
+  updateAccount,
+  deleteAccount as removeAccount,
+} from '../services/account';
 
 export interface ToolCall {
   name: string;
@@ -91,123 +102,141 @@ async function executeAccountTool(
   c: Context,
   params: any
 ): Promise<ToolResult> {
-  const mcpServerUrl = getMcpServerUrl(c);
-  const mcpToken = await getMcpToken(c);
   const { action, email, name, password, sessionToken } = params;
 
-  switch (action) {
-    case 'register': {
-      // [PUBLIC] Register a new account
-      const response = await fetch(
-        `${mcpServerUrl}/account/register`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, name, password }),
-        }
-      );
-      const data = await response.json();
-      return { success: true, data };
+  const isSecureRequest = () => new URL(c.req.url).protocol === 'https:';
+
+  const setSessionCookie = (token: string) => {
+    setCookie(c, 'session', token, {
+      httpOnly: true,
+      secure: isSecureRequest(),
+      sameSite: 'Lax',
+      maxAge: 7 * 24 * 60 * 60,
+      path: '/',
+    });
+  };
+
+  const clearSessionCookie = () => {
+    deleteCookie(c, 'session', {
+      httpOnly: true,
+      secure: isSecureRequest(),
+      sameSite: 'Lax',
+      path: '/',
+    });
+  };
+
+  const resolveSessionToken = () => {
+    if (sessionToken) {
+      return sessionToken as string;
     }
 
-    case 'login': {
-      // [PUBLIC] Login with email and password
-      const response = await fetch(
-        `${mcpServerUrl}/account/login`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        }
-      );
-      const data = await response.json();
-      return { success: true, data };
+    const headerToken = extractSessionTokenFromAuthHeader(
+      c.req.header('Authorization')
+    );
+    if (headerToken) {
+      return headerToken;
     }
 
-    case 'get_profile': {
-      // [AUTH] Get current user profile
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (mcpToken) {
-        headers['Authorization'] = `Bearer ${mcpToken}`;
-      } else if (sessionToken) {
-        headers['Cookie'] = `session=${sessionToken}`;
+    const cookieToken = getCookie(c, 'session');
+    if (cookieToken) {
+      return cookieToken;
+    }
+
+    return null;
+  };
+
+  try {
+    switch (action) {
+      case 'register': {
+        const result = await registerAccount({ email, name, password });
+        setSessionCookie(result.sessionToken);
+        return {
+          success: true,
+          data: {
+            user: result.account,
+            sessionToken: result.sessionToken,
+            message: result.message,
+          },
+        };
       }
-      
-      const response = await fetch(
-        `${mcpServerUrl}/account/me`,
-        { headers }
-      );
-      const data = await response.json();
-      return { success: true, data };
-    }
 
-    case 'update': {
-      // [AUTH] Update account information
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (mcpToken) {
-        headers['Authorization'] = `Bearer ${mcpToken}`;
-      } else if (sessionToken) {
-        headers['Cookie'] = `session=${sessionToken}`;
+      case 'login': {
+        const result = await loginAccount({ email, password });
+        setSessionCookie(result.sessionToken);
+        return {
+          success: true,
+          data: {
+            user: result.account,
+            sessionToken: result.sessionToken,
+            message: result.message,
+          },
+        };
       }
-      
-      const response = await fetch(
-        `${mcpServerUrl}/account/update`,
-        {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify({ name, email }),
-        }
-      );
-      const data = await response.json();
-      return { success: true, data };
-    }
 
-    case 'delete': {
-      // [AUTH] Delete account
-      const headers: Record<string, string> = {};
-      if (mcpToken) {
-        headers['Authorization'] = `Bearer ${mcpToken}`;
-      } else if (sessionToken) {
-        headers['Cookie'] = `session=${sessionToken}`;
+      case 'get_profile': {
+        const token = resolveSessionToken();
+        if (!token) {
+          throw new AccountError('Authentication required', 401);
+        }
+
+        const profile = await getAccountProfile(token);
+        return { success: true, data: profile };
       }
-      
-      const response = await fetch(
-        `${mcpServerUrl}/account/delete`,
-        {
-          method: 'DELETE',
-          headers
-        }
-      );
-      const data = await response.json();
-      return { success: true, data };
-    }
 
-    case 'logout': {
-      // [AUTH] Logout
-      const headers: Record<string, string> = {};
-      if (mcpToken) {
-        headers['Authorization'] = `Bearer ${mcpToken}`;
-      } else if (sessionToken) {
-        headers['Cookie'] = `session=${sessionToken}`;
+      case 'update': {
+        const token = resolveSessionToken();
+        if (!token) {
+          throw new AccountError('Authentication required', 401);
+        }
+
+        const result = await updateAccount(token, { name, email });
+        setSessionCookie(result.sessionToken);
+        return {
+          success: true,
+          data: {
+            user: result.account,
+            sessionToken: result.sessionToken,
+            message: result.message,
+          },
+        };
       }
-      
-      const response = await fetch(
-        `${mcpServerUrl}/account/logout`,
-        {
-          method: 'POST',
-          headers
+
+      case 'delete': {
+        const token = resolveSessionToken();
+        if (!token) {
+          throw new AccountError('Authentication required', 401);
         }
-      );
-      const data = await response.json();
-      return { success: true, data };
+
+        const result = await removeAccount(token);
+        clearSessionCookie();
+        return {
+          success: true,
+          data: { message: result.message },
+        };
+      }
+
+      case 'logout': {
+        const result = await logoutAccount();
+        clearSessionCookie();
+        return {
+          success: true,
+          data: { message: result.message },
+        };
+      }
+
+      default:
+        return { success: false, error: `Unknown account action: ${action}` };
+    }
+  } catch (error) {
+    if (error instanceof AccountError) {
+      return { success: false, error: error.message };
     }
 
-    default:
-      return { success: false, error: `Unknown account action: ${action}` };
+    if (error instanceof Error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: false, error: 'Unknown error' };
   }
 }
 

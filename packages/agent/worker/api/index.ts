@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { createAIAgent } from '../ai';
 import { executeToolCall } from '../ai/tools';
+import account from './account';
 import { createPaymentService } from '../payment';
 
 type Bindings = {
@@ -20,6 +21,9 @@ app.use('/*', cors());
 app.get('/health', (c) => {
   return c.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Mount account management API
+app.route('/account', account);
 
 // Conversations API
 app.post('/conversations', async (c) => {
