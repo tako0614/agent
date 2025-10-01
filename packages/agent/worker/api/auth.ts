@@ -29,12 +29,22 @@ app.get('/login/google', async (c) => {
   try {
     const state = authService.generateState();
     const codeVerifier = authService.generateCodeVerifier();
-    const url = await authService.createGoogleAuthorizationURL(state);
+    const url = await authService.createGoogleAuthorizationURL(state, codeVerifier);
 
-    // Store state and code verifier in cookie for validation
+    // Determine if we're in a secure context
+    const isSecure = new URL(c.req.url).protocol === 'https:';
+
+  // Debug logging
+  console.log('Google login - Setting cookies:', {
+    state: state.substring(0, 10) + '...',
+    codeVerifier: codeVerifier.substring(0, 10) + '...',
+    isSecure,
+    url: c.req.url,
+    redirectUrl: url.toString()
+  });    // Store state and code verifier in cookie for validation
     setCookie(c, 'oauth_state', state, {
       httpOnly: true,
-      secure: true,
+      secure: isSecure,
       sameSite: 'Lax',
       maxAge: 600, // 10 minutes
       path: '/',
@@ -42,7 +52,7 @@ app.get('/login/google', async (c) => {
     
     setCookie(c, 'code_verifier', codeVerifier, {
       httpOnly: true,
-      secure: true,
+      secure: isSecure,
       sameSite: 'Lax',
       maxAge: 600, // 10 minutes
       path: '/',
@@ -68,12 +78,15 @@ app.get('/login/line', async (c) => {
   try {
     const state = authService.generateState();
     const codeVerifier = authService.generateCodeVerifier();
-    const url = await authService.createLINEAuthorizationURL(state);
+    const url = await authService.createLINEAuthorizationURL(state, codeVerifier);
+
+    // Determine if we're in a secure context
+    const isSecure = new URL(c.req.url).protocol === 'https:';
 
     // Store state and code verifier in cookie for validation
     setCookie(c, 'oauth_state', state, {
       httpOnly: true,
-      secure: true,
+      secure: isSecure,
       sameSite: 'Lax',
       maxAge: 600, // 10 minutes
       path: '/',
@@ -81,7 +94,7 @@ app.get('/login/line', async (c) => {
     
     setCookie(c, 'code_verifier', codeVerifier, {
       httpOnly: true,
-      secure: true,
+      secure: isSecure,
       sameSite: 'Lax',
       maxAge: 600, // 10 minutes
       path: '/',
@@ -102,6 +115,19 @@ app.get('/callback/google', async (c) => {
   const state = c.req.query('state');
   const storedState = getCookie(c, 'oauth_state');
   const codeVerifier = getCookie(c, 'code_verifier');
+
+  // Debug logging with raw cookie header
+  const cookieHeader = c.req.header('cookie');
+  console.log('Google callback debug:', {
+    code: code ? code.substring(0, 20) + '...' : 'MISSING',
+    state: state ? state.substring(0, 20) + '...' : 'MISSING',
+    storedState: storedState ? storedState.substring(0, 20) + '...' : 'MISSING',
+    codeVerifier: codeVerifier ? codeVerifier.substring(0, 20) + '...' : 'MISSING',
+    stateMatch: state === storedState,
+    hasCookieHeader: !!cookieHeader,
+    cookieHeader: cookieHeader || 'NO COOKIE HEADER',
+    url: c.req.url
+  });
 
   // Validate state and code verifier
   if (!code || !state || state !== storedState || !codeVerifier) {
@@ -128,10 +154,13 @@ app.get('/callback/google', async (c) => {
     // Create session token
     const sessionToken = authService.createSessionToken(userInfo);
 
+    // Determine if we're in a secure context
+    const isSecure = new URL(c.req.url).protocol === 'https:';
+
     // Set session cookie
     setCookie(c, 'session', sessionToken, {
       httpOnly: true,
-      secure: true,
+      secure: isSecure,
       sameSite: 'Lax',
       maxAge: 7 * 24 * 60 * 60, // 7 days
       path: '/',
@@ -185,10 +214,13 @@ app.get('/callback/line', async (c) => {
     // Create session token
     const sessionToken = authService.createSessionToken(userInfo);
 
+    // Determine if we're in a secure context
+    const isSecure = new URL(c.req.url).protocol === 'https:';
+
     // Set session cookie
     setCookie(c, 'session', sessionToken, {
       httpOnly: true,
-      secure: true,
+      secure: isSecure,
       sameSite: 'Lax',
       maxAge: 7 * 24 * 60 * 60, // 7 days
       path: '/',

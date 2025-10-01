@@ -47,12 +47,11 @@ export class AuthService {
   /**
    * Generate authorization URL for Google
    */
-  async createGoogleAuthorizationURL(state: string): Promise<URL> {
+  async createGoogleAuthorizationURL(state: string, codeVerifier: string): Promise<URL> {
     if (!this.google) {
       throw new Error('Google OAuth is not configured');
     }
 
-    const codeVerifier = this.generateCodeVerifier();
     const scopes = ['openid', 'profile', 'email'];
     return await this.google.createAuthorizationURL(state, codeVerifier, scopes);
   }
@@ -60,12 +59,11 @@ export class AuthService {
   /**
    * Generate authorization URL for LINE
    */
-  async createLINEAuthorizationURL(state: string): Promise<URL> {
+  async createLINEAuthorizationURL(state: string, codeVerifier: string): Promise<URL> {
     if (!this.line) {
       throw new Error('LINE OAuth is not configured');
     }
 
-    const codeVerifier = this.generateCodeVerifier();
     const scopes = ['profile', 'openid', 'email'];
     return await this.line.createAuthorizationURL(state, codeVerifier, scopes);
   }
