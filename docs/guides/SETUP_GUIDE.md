@@ -9,41 +9,38 @@
 │  AI Service (localhost:8787)                        │
 │  - ユーザー認証 (Google/LINE OAuth)                  │
 │  - AIエージェント (LangGraph)                        │
-│  - MCP トークン発行                                  │
+│  - MCP トークン発行 (DB保存)                         │
 └──────────────┬──────────────────────────────────────┘
-               │ Bearer Token (JWT)
+               │ Bearer Token (DB-based)
                ▼
 ┌─────────────────────────────────────────────────────┐
 │  MCP Server (localhost:8788)                        │
-│  - トークン検証                                       │
+│  - トークン検証 (DB照合)                              │
 │  - ビジネスツール (予約/商品/注文/フォーム)            │
 │  - 管理者認証 (Google OAuth)                         │
 └─────────────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────────┐
+│  PostgreSQL Database (共有)                          │
+│  - ユーザー情報                                       │
+│  - セッション管理                                     │
+│  - MCPアクセストークン                                │
+└─────────────────────────────────────────────────────┘
 ```
 
-## 🔑 RSA鍵ペアの生成
+## 🔐 認証方式
 
-AIサービスとMCPサーバー間の通信には、RS256アルゴリズムを使用したJWTトークンを使用します。
+このプロジェクトでは、**DBベースのトークン認証**を採用しています。
 
-### 1. 秘密鍵の生成 (AI Service用)
+### 特徴
+- ✅ セキュアなランダムトークン生成
+- ✅ データベースで一元管理
+- ✅ 有効期限とスコープをDB上で管理
+- ✅ RSA鍵ペアの生成・管理が不要
+- ✅ シンプルで理解しやすい実装
 
-```powershell
-# 秘密鍵を生成
-openssl genrsa -out private_key.pem 2048
-
-# 秘密鍵の内容を確認
-cat private_key.pem
-```
-
-### 2. 公開鍵の抽出 (MCP Server用)
-
-```powershell
-# 秘密鍵から公開鍵を抽出
-openssl rsa -in private_key.pem -pubout -out public_key.pem
-
-# 公開鍵の内容を確認
-cat public_key.pem
-```
+詳細は [認証システム簡素化レポート](../reports/AUTH_SIMPLIFICATION.md) を参照してください。
 
 ## 📦 インストール
 
@@ -70,13 +67,11 @@ GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URI=http://localhost:8787/auth/callback/google
 
-# 秘密鍵の内容をそのままペースト (改行は\nに変換)
-MCP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-MIIEpAIBAAKCAQEA...
-...
------END RSA PRIVATE KEY-----"
-
+# MCP Server URL (for calling MCP tools)
 MCP_SERVER_URL=http://localhost:8788
+
+# Frontend URL (for redirects after OAuth)
+FRONTEND_URL=http://localhost:8787
 ```
 
 ### 2. MCP Server のセットアップ
@@ -103,12 +98,7 @@ MCP_GOOGLE_CLIENT_ID=your-mcp-google-client-id
 MCP_GOOGLE_CLIENT_SECRET=your-mcp-google-client-secret
 MCP_GOOGLE_REDIRECT_URI=http://localhost:8788/auth/callback/google
 
-# 公開鍵の内容をそのままペースト (改行は\nに変換)
-AI_SERVICE_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...
-...
------END PUBLIC KEY-----"
-
+# CORS設定
 ALLOWED_ORIGINS=http://localhost:8787,http://localhost:5173
 ```
 
@@ -180,9 +170,10 @@ curl http://localhost:8787/auth/mcp-token `
 レスポンス例:
 ```json
 {
-  "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token": "k7j2h3g4f5d6s7a8q9w0e1r2t3y4u5i6...",
   "expiresIn": 3600,
-  "tokenType": "Bearer"
+  "tokenType": "Bearer",
+  "scope": ["booking:read", "booking:create", "product:read", "order:create"]
 }
 ```
 
@@ -215,14 +206,13 @@ start http://localhost:8788/auth/login/google
 **症状**: MCP Serverで "Invalid token" エラー
 
 **解決策**:
-1. 秘密鍵と公開鍵のペアが正しいか確認
-2. 鍵のフォーマットが正しいか確認 (BEGIN/END行を含む)
-3. 改行文字が `\n` に変換されているか確認
+1. トークンが有効期限内か確認（デフォルト1時間）
+2. データベースの `mcp_access_tokens` テーブルを確認
+3. 両サービスが同じデータベースに接続しているか確認
 
 ```powershell
-# 鍵ペアの検証
-openssl rsa -in private_key.pem -check
-openssl rsa -in private_key.pem -pubout | diff - public_key.pem
+# データベースでトークンを確認
+psql $env:DATABASE_URL -c "SELECT * FROM mcp_access_tokens WHERE token = 'YOUR_TOKEN';"
 ```
 
 ### CORS エラー
@@ -264,8 +254,8 @@ cd packages/agent
 # Secretsの設定
 wrangler secret put OPENAI_API_KEY
 wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put MCP_PRIVATE_KEY
 wrangler secret put DATABASE_URL
+wrangler secret put STRIPE_SECRET_KEY
 
 # デプロイ
 npm run deploy
@@ -277,7 +267,6 @@ cd packages/mcp-server
 
 # Secretsの設定
 wrangler secret put MCP_GOOGLE_CLIENT_SECRET
-wrangler secret put AI_SERVICE_PUBLIC_KEY
 wrangler secret put DATABASE_URL
 
 # デプロイ
@@ -288,5 +277,7 @@ npm run deploy
 
 本番環境では、URLを本番ドメインに変更:
 - `GOOGLE_REDIRECT_URI`: `https://your-domain.com/auth/callback/google`
+- `MCP_GOOGLE_REDIRECT_URI`: `https://mcp.your-domain.com/auth/callback/google`
 - `MCP_SERVER_URL`: `https://mcp.your-domain.com`
 - `ALLOWED_ORIGINS`: `https://your-domain.com`
+- `FRONTEND_URL`: `https://your-domain.com`

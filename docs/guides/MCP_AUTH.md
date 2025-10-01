@@ -4,6 +4,8 @@
 
 MCPサーバーは**独立したCloudflare Workersプロジェクト**として別ドメインに配置され、AIサービスとは分離された認証システムを持ちます。
 
+認証方式は**DBベースのトークン管理**を採用しており、RSA鍵ペアやJWT署名は使用しません。
+
 ### アーキテクチャ概要
 
 ```
@@ -11,16 +13,24 @@ MCPサーバーは**独立したCloudflare Workersプロジェクト**として�
 │  AIサービス (ai-service.example.com)                      │
 │  - Google/LINE OAuth認証                                  │
 │  - ユーザーセッション管理                                  │
-│  - MCPアクセストークン発行                                 │
+│  - MCPアクセストークン発行 (DB保存)                        │
 └────────────────┬─────────────────────────────────────────┘
                  │ HTTPリクエスト
-                 │ Authorization: Bearer <ai-service-token>
+                 │ Authorization: Bearer <random-token>
                  ▼
 ┌──────────────────────────────────────────────────────────┐
 │  MCPサーバー (mcp-api.example.com)                        │
-│  - AIサービストークン検証                                  │
+│  - トークン検証 (DB照合)                                   │
 │  - 独自Google OAuth(開発者/管理者用)                       │
 │  - MCP Tools提供                                          │
+└──────────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────────┐
+│  PostgreSQL Database (共有)                               │
+│  - McpAccessToken テーブル                                │
+│  - Session テーブル                                       │
+│  - User テーブル                                          │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -29,15 +39,15 @@ MCPサーバーは**独立したCloudflare Workersプロジェクト**として�
 MCPサーバーは以下の**2つの独立した認証方式**をサポートします:
 
 ### 1. **AIサービストークン認証** (エンドユーザー向け)
-   - AIサービスがユーザー認証後にトークンを発行
-   - MCPサーバーがAIサービス発行トークンを検証
+   - AIサービスがユーザー認証後にトークンを発行しDBに保存
+   - MCPサーバーがDBからトークンを検証
    - ユーザーはAIサービスのGoogle/LINE認証を利用
    - MCPサーバー側では直接認証しない
 
 **フロー**:
 ```
-User → AIサービス(Google/LINE認証) → AIサービストークン発行
-  → MCP APIリクエスト(AIサービストークン付き) → トークン検証 → アクセス許可
+User → AIサービス(Google/LINE認証) → DBにトークン保存
+  → MCP APIリクエスト(トークン付き) → DB照合で検証 → アクセス許可
 ```
 
 ### 2. **MCP独自Google OAuth** (開発者/管理者向け)
@@ -62,29 +72,37 @@ Developer → MCP Google認証 → MCPセッション確立
 
 #### 1. `worker/auth/mcp-token.ts` - MCPアクセストークン管理
 ```typescript
-// AIサービスがMCP用トークンを発行
-export async function generateMcpAccessToken(
+import { randomBytes } from 'node:crypto';
+import { PrismaClient } from '@prisma/client';
+
+// AIサービスがMCP用トークンを発行してDBに保存
+export async function generateMcpToken(
+  prisma: PrismaClient,
   userId: string,
-  scope: string[] = ['read', 'write']
+  scope: string[] = ['booking:read', 'booking:create', 'product:read', 'order:create']
 ): Promise<string> {
-  // JWTトークン生成
-  const token = await signJWT({
-    userId,
-    scope,
-    iss: 'ai-service.example.com',
-    exp: Math.floor(Date.now() / 1000) + (60 * 60) // 1時間
+  // セキュアなランダムトークン生成
+  const token = randomBytes(32).toString('base64url');
+
+  // DBに保存
+  await prisma.mcpAccessToken.create({
+    data: {
+      userId,
+      token,
+      scope,
+      expiresAt: new Date(Date.now() + 3600 * 1000), // 1時間
+    }
   });
+
   return token;
 }
 
 // AIエージェントがMCP APIを呼び出す
 export async function callMcpApi(
   endpoint: string,
-  userId: string,
+  token: string,
   data: any
 ) {
-  const token = await generateMcpAccessToken(userId);
-  
   const response = await fetch(`https://mcp-api.example.com${endpoint}`, {
     method: 'POST',
     headers: {
@@ -100,98 +118,167 @@ export async function callMcpApi(
 
 #### 2. `worker/api/conversations.ts` - AI会話処理
 ```typescript
+import { PrismaClient } from '@prisma/client';
+import { generateMcpToken } from '../auth/mcp-token';
+
 // AIがユーザーのリクエストを処理し、必要に応じてMCP APIを呼び出す
 app.post('/api/conversations/:id/messages', async (c) => {
+  const prisma = new PrismaClient({ datasources: { db: { url: c.env.DATABASE_URL } } });
   const userId = getCurrentUserId(c); // AIサービスのセッションから取得
   const message = await c.req.json();
+  
+  // MCP用トークンを生成（必要時）
+  const mcpToken = await generateMcpToken(prisma, userId);
   
   // LangGraphでAI処理
   const result = await aiAgent.process(message.content, {
     userId,
-    mcpTokenGenerator: (scope) => generateMcpAccessToken(userId, scope)
+    mcpToken // AIエージェントがこれを使ってMCP APIを呼び出す
   });
   
+  await prisma.$disconnect();
   return c.json({ result });
 });
 ```
 
 ### MCPサーバー側 (`packages/mcp-server/worker/`)
 
-#### 1. `worker/mcp/middleware.ts` - 認証ミドルウェア
+#### 1. `worker/auth/verify.ts` - トークン検証
 
 ```typescript
-// AIサービストークン検証
-export const verifyAiServiceToken: MiddlewareHandler = async (c, next) => {
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-  
-  const token = authHeader.slice(7);
-  
-  try {
-    // JWTトークン検証
-    const payload = await verifyJWT(token, AI_SERVICE_PUBLIC_KEY);
-    
-    // トークン発行者確認
-    if (payload.iss !== 'ai-service.example.com') {
-      return c.json({ error: 'Invalid token issuer' }, 401);
-    }
-    
-    // ユーザー情報をコンテキストに設定
-    c.set('userId', payload.userId);
-    c.set('scope', payload.scope);
-    c.set('authType', 'ai-service');
-    
-    await next();
-  } catch (error) {
-    return c.json({ error: 'Invalid token' }, 401);
-  }
-};
+import { PrismaClient } from '@prisma/client';
 
-// MCP独自Google認証検証
-export const verifyMcpSession: MiddlewareHandler = async (c, next) => {
-  const sessionId = c.req.cookie('mcp_session');
-  if (!sessionId) {
-    return redirectToMcpLogin(c);
-  }
-  
-  const session = await getSessionFromDB(sessionId);
-  if (!session || session.expired) {
-    return redirectToMcpLogin(c);
-  }
-  
-  c.set('mcpUserId', session.userId);
-  c.set('authType', 'mcp-oauth');
-  
-  await next();
-};
+export interface TokenPayload {
+  userId: string;
+  scope: string[];
+}
 
-// 柔軟な認証: AIサービストークンまたはMCPセッション
-export const requireAuth: MiddlewareHandler = async (c, next) => {
-  // まずAIサービストークンを試す
-  const authHeader = c.req.header('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    return verifyAiServiceToken(c, next);
-  }
-  
-  // 次にMCPセッションを試す
-  const sessionId = c.req.cookie('mcp_session');
-  if (sessionId) {
-    return verifyMcpSession(c, next);
-  }
-  
-  return c.json({ error: 'Authentication required' }, 401);
-};
+// DBからMCPアクセストークンを検証
+export async function verifyMcpAccessToken(
+  prisma: PrismaClient,
+  token: string
+): Promise<TokenPayload> {
+  const mcpToken = await prisma.mcpAccessToken.findUnique({
+    where: { token },
+    include: { user: true }
+  });
 
-// 公開アクセス許可
-export const publicEndpoint: MiddlewareHandler = async (c, next) => {
-  c.set('authType', 'public');
-  await next();
-};
+  if (!mcpToken) {
+    throw new Error('Token not found');
+  }
+
+  // 有効期限チェック
+  if (mcpToken.expiresAt < new Date()) {
+    await prisma.mcpAccessToken.delete({ where: { id: mcpToken.id } });
+    throw new Error('Token expired');
+  }
+
+  return {
+    userId: mcpToken.userId,
+    scope: mcpToken.scope
+  };
+}
+
+// スコープチェック
+export function hasScope(requiredScope: string, userScopes: string[]): boolean {
+  if (userScopes.includes(requiredScope)) return true;
+  
+  // ワイルドカード (例: "booking:*" が "booking:read" にマッチ)
+  const [resource] = requiredScope.split(':');
+  return userScopes.includes(`${resource}:*`) || userScopes.includes('*');
+}
 ```
 
-#### 2. `worker/auth/mcp-oauth.ts` - MCP独自Google認証
+#### 2. `worker/mcp/middleware.ts` - 認証ミドルウェア
+
+```typescript
+import { PrismaClient } from '@prisma/client';
+import { verifyMcpAccessToken } from '../auth/verify';
+
+// ミドルウェアは統一的な認証チェックを実施
+export function middleware(handler: any): any {
+  const app = handler;
+
+  app.use('/*', async (c: any, next: any) => {
+    const databaseUrl = c.env.DATABASE_URL;
+    if (!databaseUrl) {
+      return c.json({ error: 'Database not configured' }, 500);
+    }
+
+    const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+
+    // AIサービストークン検証
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      
+      try {
+        const payload = await verifyMcpAccessToken(prisma, token);
+        
+        const user = await prisma.user.findUnique({
+          where: { id: payload.userId }
+        });
+
+        if (!user) {
+          await prisma.$disconnect();
+          return c.json({ error: 'User not found' }, 401);
+        }
+        
+        c.set('auth', {
+          type: 'mcp-token',
+          userId: payload.userId,
+          scope: payload.scope,
+          user: { id: user.id, email: user.email, name: user.name || '' }
+        });
+        
+        c.set('prisma', prisma);
+        await next();
+        await prisma.$disconnect();
+        return;
+      } catch (error) {
+        await prisma.$disconnect();
+        return c.json({ error: 'Invalid token' }, 401);
+      }
+    }
+
+    // MCP管理者セッション検証
+    const cookies = c.req.header('Cookie');
+    const sessionCookie = cookies?.split(';').find((c: string) => c.trim().startsWith('mcp_session='));
+    
+    if (sessionCookie) {
+      try {
+        const sessionToken = sessionCookie.split('=')[1];
+        const sessionData = JSON.parse(atob(sessionToken));
+        
+        c.set('auth', {
+          type: 'mcp-admin',
+          userId: sessionData.userId,
+          scope: ['*'], // 管理者は全権限
+          user: {
+            id: sessionData.userId,
+            email: sessionData.email,
+            name: sessionData.name,
+            role: sessionData.role
+          }
+        });
+        
+        c.set('prisma', prisma);
+        await next();
+        await prisma.$disconnect();
+        return;
+      } catch (error) {
+        await prisma.$disconnect();
+        return c.json({ error: 'Invalid session' }, 401);
+      }
+    }
+
+    await prisma.$disconnect();
+    return c.json({ error: 'Authentication required' }, 401);
+  });
+
+  return app;
+}
+```
 
 ```typescript
 // MCP管理者/開発者用Google OAuth
@@ -356,19 +443,16 @@ const products = await response.json();
 3. OAuth完了 → AIサービスのセッションCookie設定
 4. User → AIチャットでリクエスト送信
 5. AIサービス → ユーザー意図を解析
-6. AIサービス → MCPアクセストークン生成
-   - ユーザーID含む
-   - スコープ指定(read, write等)
-   - 有効期限1時間
-   - AIサービスの秘密鍵で署名
+6. AIサービス → MCPアクセストークン生成（DBに保存）
+   - セキュアなランダムトークン生成
+   - ユーザーID、スコープ、有効期限をDBに保存
 7. AIサービス → MCP API呼び出し
-   - Authorization: Bearer <mcp-access-token>
-8. MCPサーバー → トークン検証
-   - 署名検証
-   - 発行者確認(ai-service.example.com)
+   - Authorization: Bearer <random-token>
+8. MCPサーバー → トークン検証（DB照合）
+   - DBでトークンを検索
    - 有効期限チェック
    - スコープ確認
-9. MCPサーバー → ユーザーIDをコンテキストに設定
+9. MCPサーバー → ユーザー情報をDBから取得
 10. MCPサーバー → Tools実行
 11. MCPサーバー → 結果を返す
 12. AIサービス → 結果を整形してユーザーに返答
@@ -412,25 +496,28 @@ const products = await response.json();
   - 別のセッション管理
   - 直接アクセス用
 
-### 2. トークンベース認証(AIサービス → MCP)
+### 2. DBベース認証(AIサービス → MCP)
 
-- **JWT(JSON Web Token)使用**
-  - AIサービスの秘密鍵で署名
-  - MCPサーバーが公開鍵で検証
+- **セキュアなランダムトークン使用**
+  - `crypto.randomBytes()` で生成
+  - DBに保存して検証
   - 改ざん防止
 
-- **トークンペイロード**:
-  ```json
+- **トークン情報（DBテーブル: McpAccessToken)**:
+  ```typescript
   {
-    "userId": "usr_123",
-    "scope": ["booking:create", "product:read"],
-    "iss": "ai-service.example.com",
-    "exp": 1696300800
+    id: string;
+    userId: string;
+    token: string;  // セキュアなランダム文字列
+    scope: string[]; // ["booking:create", "product:read"]
+    expiresAt: Date;
+    createdAt: Date;
   }
   ```
 
-- **有効期限**: 1時間(短期)
+- **有効期限**: 1時間(短期、DBで管理)
 - **スコープ制御**: 必要最小限の権限のみ付与
+- **即座に無効化可能**: DBから削除するだけ
 
 ### 3. セッション管理
 
@@ -480,7 +567,26 @@ LINE_REDIRECT_URI=https://ai-service.example.com/auth/callback/line
 
 # MCPアクセストークン用の鍵ペア
 MCP_TOKEN_PRIVATE_KEY=your-private-key-for-signing
-MCP_TOKEN_PUBLIC_KEY=your-public-key-for-verification
+## 環境変数設定
+
+### AIサービス (.dev.vars または Cloudflare Secrets)
+
+```env
+# Google OAuth(エンドユーザー認証用)
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=https://ai-service.example.com/auth/callback/google
+
+# LINE OAuth(エンドユーザー認証用)
+LINE_CLIENT_ID=your-line-client-id
+LINE_CLIENT_SECRET=your-line-client-secret
+LINE_REDIRECT_URI=https://ai-service.example.com/auth/callback/line
+
+# OpenAI API
+OPENAI_API_KEY=sk-your-openai-key
+
+# Database (共有)
+DATABASE_URL=postgresql://user:password@host:5432/dbname
 
 # MCPサーバーのURL
 MCP_SERVER_URL=https://mcp-api.example.com
@@ -489,7 +595,7 @@ MCP_SERVER_URL=https://mcp-api.example.com
 FRONTEND_URL=https://your-frontend.com
 ```
 
-### MCPサーバー (.env または Cloudflare Secrets)
+### MCPサーバー (.dev.vars または Cloudflare Secrets)
 
 ```env
 # MCP独自のGoogle OAuth(開発者/管理者用)
@@ -497,25 +603,11 @@ MCP_GOOGLE_CLIENT_ID=your-mcp-google-client-id
 MCP_GOOGLE_CLIENT_SECRET=your-mcp-google-client-secret
 MCP_GOOGLE_REDIRECT_URI=https://mcp-api.example.com/auth/callback/google
 
-# AIサービスのトークン検証用公開鍵
-AI_SERVICE_PUBLIC_KEY=your-public-key-from-ai-service
+# Database (AIサービスと共有)
+DATABASE_URL=postgresql://user:password@host:5432/dbname
 
-# AIサービスの発行者URL(検証用)
-AI_SERVICE_ISSUER=ai-service.example.com
-
-# データベース接続
-DATABASE_URL=your-postgresql-connection-string
-```
-
-### 鍵ペア生成
-
-```bash
-# RSA鍵ペアを生成(AIサービス側で実行)
-openssl genrsa -out private.pem 2048
-openssl rsa -in private.pem -outform PEM -pubout -out public.pem
-
-# private.pem → MCP_TOKEN_PRIVATE_KEY (AIサービス)
-# public.pem → AI_SERVICE_PUBLIC_KEY (MCPサーバー)
+# CORS設定
+ALLOWED_ORIGINS=https://ai-service.example.com,https://your-frontend.com
 ```
 
 ### Cloudflare Secrets設定
@@ -525,12 +617,12 @@ openssl rsa -in private.pem -outform PEM -pubout -out public.pem
 cd packages/agent
 wrangler secret put GOOGLE_CLIENT_SECRET
 wrangler secret put LINE_CLIENT_SECRET
-wrangler secret put MCP_TOKEN_PRIVATE_KEY
+wrangler secret put OPENAI_API_KEY
+wrangler secret put DATABASE_URL
 
 # MCPサーバー
 cd packages/mcp-server
 wrangler secret put MCP_GOOGLE_CLIENT_SECRET
-wrangler secret put AI_SERVICE_PUBLIC_KEY
 wrangler secret put DATABASE_URL
 ```
 
@@ -703,19 +795,26 @@ model McpSession {
 ### AIサービスからMCPへのアクセスが失敗する
 
 1. **トークン生成の確認**
-   - `MCP_TOKEN_PRIVATE_KEY`が正しく設定されているか
-   - トークンのペイロードに必要な情報が含まれているか
+   - `DATABASE_URL`が両サービスで正しく設定されているか
+   - トークンが正常にDBに保存されているか
+   - `mcp_access_tokens`テーブルを確認
+
+   ```sql
+   SELECT * FROM mcp_access_tokens WHERE user_id = 'YOUR_USER_ID';
+   ```
 
 2. **トークン検証の確認**
-   - MCPサーバーの`AI_SERVICE_PUBLIC_KEY`が正しいか
-   - 公開鍵と秘密鍵のペアが一致しているか
+   - MCPサーバーが同じデータベースに接続しているか
+   - トークンが有効期限内か
+   - スコープが正しく設定されているか
 
-3. **発行者検証**
-   - トークンの`iss`フィールドが`AI_SERVICE_ISSUER`と一致するか
+3. **有効期限**
+   - トークンが期限切れでないか（デフォルト1時間）
+   - 期限切れトークンは自動的に削除される
 
-4. **有効期限**
-   - トークンが期限切れでないか
-   - システム時刻が同期されているか
+4. **データベース接続**
+   - 両サービスが同じDBインスタンスに接続しているか
+   - ネットワーク接続が正常か
 
 ### MCP Google認証が機能しない
 

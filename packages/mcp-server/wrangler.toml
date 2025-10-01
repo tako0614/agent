@@ -6,9 +6,9 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
-# Environment variables (set with wrangler secret put)
-# MCP_GOOGLE_CLIENT_ID
-# MCP_GOOGLE_CLIENT_SECRET
-# MCP_GOOGLE_REDIRECT_URI
-# AI_SERVICE_PUBLIC_KEY
-# DATABASE_URL
+# Environment variables (set with wrangler secret put or .dev.vars)
+# MCP_GOOGLE_CLIENT_ID - Google OAuth for MCP administrators
+# MCP_GOOGLE_CLIENT_SECRET - Google OAuth secret
+# MCP_GOOGLE_REDIRECT_URI - OAuth redirect URL
+# DATABASE_URL - PostgreSQL connection string (shared with AI Service)
+# ALLOWED_ORIGINS - CORS allowed origins
