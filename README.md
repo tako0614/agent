@@ -52,9 +52,10 @@ agent/
 │       ├── prisma/      # Prismaスキーマ
 │       └── src/         # DBサービス
 ├── docs/                # ドキュメント
-│   ├── AI_INTEGRATION.md
-│   ├── PAYMENT_INTEGRATION.md
-│   └── SUMMARY.md
+│   ├── guides/          # セットアップ & 利用ガイド
+│   ├── reports/         # 実装レポート
+│   ├── architecture/    # システム設計
+│   └── planning/        # 企画・要件
 └── package.json         # ルートパッケージ
 ```
 
@@ -137,12 +138,21 @@ npm run deploy
 
 ## 📚 ドキュメント
 
-- [AI統合ガイド](./docs/AI_INTEGRATION.md) - OpenAI/LangGraphの使い方
-- [決済統合ガイド](./docs/PAYMENT_INTEGRATION.md) - Stripe決済の実装方法
-- [MCP利用ガイド](./docs/MCP_USAGE.md) - 利用者・管理者向け機能と外部API統合
-- [プロジェクトサマリー](./docs/SUMMARY.md) - 実装状況と機能一覧
-- [アーキテクチャ](./docs/ARCHITECTURE.md) - システムアーキテクチャ
-- [クイックスタート](./docs/QUICKSTART.md) - 詳細なセットアップガイド
+### ガイド
+- [AI統合ガイド](./docs/guides/AI_INTEGRATION.md) - OpenAI/LangGraphの使い方
+- [決済統合ガイド](./docs/guides/PAYMENT_INTEGRATION.md) - Stripe決済の実装方法
+- [MCP利用ガイド](./docs/guides/MCP_USAGE.md) - 利用者・管理者向け機能と外部API統合
+- [クイックスタート](./docs/guides/QUICKSTART.md) - 詳細なセットアップガイド
+
+### レポート
+- [実装完了レポート](./docs/reports/IMPLEMENTATION_REPORT.md) - 開発セッションのまとめ
+- [OAuth認証実装完了報告](./docs/reports/AUTH_IMPLEMENTATION.md) - 認証機能の実装状況
+- [プロジェクト実装サマリー](./docs/reports/SUMMARY.md) - 実装状況と機能一覧
+- [実装完了のお知らせ](./docs/reports/GETTING_STARTED.md) - PLANに基づく進捗報告
+
+### 設計・企画
+- [アーキテクチャ概要](./docs/architecture/ARCHITECTURE.md) - システムアーキテクチャ
+- [プロジェクト計画](./docs/planning/PLAN.md) - 企画と要件定義
 
 ## 🔌 主なAPIエンドポイント
 
@@ -199,7 +209,7 @@ AIエージェントが使用できるツール(利用者・管理者両方):
 - **利用者**: フォーム表示、回答送信
 - **管理者**: フォーム作成、回答確認、管理
 
-詳細は[MCP利用ガイド](./docs/MCP_USAGE.md)を参照。
+詳細は[MCP利用ガイド](./docs/guides/MCP_USAGE.md)を参照。
 
 ## 🧪 テスト
 

@@ -38,7 +38,7 @@ GoogleとLINEのOAuth認証機能を実装しました。
 
 ### ドキュメント
 
-1. **`docs/AUTH_INTEGRATION.md`** - 認証システムの詳細ドキュメント
+1. **`docs/guides/AUTH_INTEGRATION.md`** - 認証システムの詳細ドキュメント
    - OAuth設定手順
    - 認証フローの説明
    - フロントエンド統合方法

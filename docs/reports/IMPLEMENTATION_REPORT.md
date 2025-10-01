@@ -72,14 +72,14 @@
 ### 5. ドキュメント
 
 #### 新規作成
-- `docs/AI_INTEGRATION.md` - AI機能の詳細ガイド
+- `docs/guides/AI_INTEGRATION.md` - AI機能の詳細ガイド
   - セットアップ手順
   - API使用方法
   - ツールの説明
   - カスタマイズ方法
   - トラブルシューティング
 
-- `docs/PAYMENT_INTEGRATION.md` - 決済機能の詳細ガイド
+- `docs/guides/PAYMENT_INTEGRATION.md` - 決済機能の詳細ガイド
   - Stripeセットアップ
   - 決済フローの説明
   - Webhook設定
@@ -94,7 +94,7 @@
   - APIリファレンス
   - コマンドリスト
 
-- `docs/SUMMARY.md`
+- `docs/reports/SUMMARY.md`
   - AI統合: ⏳ → ✅
   - Stripe決済: ⏳ → ✅
 
