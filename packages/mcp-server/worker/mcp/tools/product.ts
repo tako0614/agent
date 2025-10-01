@@ -1,6 +1,24 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
 import type { McpVariables, AuthContext } from '../../types';
+import type { PrismaClient, Prisma } from '@prisma/client';
+
+type PrismaContext = PrismaClient | undefined;
+
+function getPrisma(c: any): PrismaClient {
+  const prisma = c.get('prisma') as PrismaContext;
+  if (!prisma) {
+    throw new Error('Database client not available');
+  }
+  return prisma;
+}
+
+function parseCategory(metadata: any): string | undefined {
+  if (metadata && typeof metadata === 'object') {
+    return metadata.category || metadata.Category;
+  }
+  return undefined;
+}
 
 const product = new Hono<{ Variables: McpVariables }>();
 
@@ -8,68 +26,93 @@ const product = new Hono<{ Variables: McpVariables }>();
 product.get('/search', async (c) => {
   const query = c.req.query('q');
   const category = c.req.query('category');
-  const limit = parseInt(c.req.query('limit') || '20');
+  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
+  const offset = parseInt(c.req.query('offset') || '0', 10);
+  const serviceId = c.req.query('serviceId');
 
-  // TODO: Search database
-  const products = [
-    {
-      id: 'prd_001',
-      name: 'Sample Product 1',
-      description: 'High quality product',
-      price: 2999,
-      category: 'electronics',
-      stock: 10,
-      imageUrl: 'https://example.com/image1.jpg'
-    },
-    {
-      id: 'prd_002',
-      name: 'Sample Product 2',
-      description: 'Amazing product',
-      price: 4999,
-      category: 'books',
-      stock: 5,
-      imageUrl: 'https://example.com/image2.jpg'
-    }
-  ];
+  try {
+    const prisma = getPrisma(c);
 
-  return c.json({
-    success: true,
-    data: {
-      products,
-      query,
-      category,
-      total: products.length
+    const where: Prisma.ProductWhereInput = {
+      isActive: true,
+    };
+
+    if (serviceId) {
+      where.serviceId = serviceId;
     }
-  });
+
+    if (query) {
+      where.OR = [
+        { name: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
+      ];
+    }
+
+    if (category) {
+      where.AND = [
+        ...(where.AND || []),
+        {
+          metadata: {
+            path: ['category'],
+            equals: category,
+          },
+        },
+      ];
+    }
+
+    const [products, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      prisma.product.count({ where }),
+    ]);
+
+    return c.json({
+      success: true,
+      data: {
+        products: products.map((productRecord) => ({
+          ...productRecord,
+          category: parseCategory(productRecord.metadata),
+        })),
+        query: query || null,
+        category: category || null,
+        pagination: {
+          limit,
+          offset,
+          total,
+        },
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to search products' }, 500);
+  }
 });
 
 // [PUBLIC] Get product details
 product.get('/:id', async (c) => {
   const id = c.req.param('id');
 
-  // TODO: Query database
-  return c.json({
-    success: true,
-    data: {
-      id,
-      name: 'Sample Product',
-      description: 'Detailed product description',
-      price: 2999,
-      category: 'electronics',
-      stock: 10,
-      images: [
-        'https://example.com/image1.jpg',
-        'https://example.com/image2.jpg'
-      ],
-      specifications: {
-        weight: '500g',
-        dimensions: '10x10x5cm',
-        color: 'Black'
-      },
-      reviews: [],
-      rating: 4.5
+  try {
+    const prisma = getPrisma(c);
+    const productRecord = await prisma.product.findUnique({ where: { id } });
+
+    if (!productRecord) {
+      return c.json({ error: 'Product not found' }, 404);
     }
-  });
+
+    return c.json({
+      success: true,
+      data: {
+        ...productRecord,
+        category: parseCategory(productRecord.metadata),
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to fetch product' }, 500);
+  }
 });
 
 // [ADMIN] Create product
@@ -77,29 +120,45 @@ product.post('/create', requireScope('product:admin'), async (c) => {
   const body = await c.req.json();
   const auth = c.get('auth') as AuthContext;
 
-  const { name, description, price, category, stock, images } = body;
+  const { name, description, price, category, stock, images, serviceId, metadata } = body;
 
-  if (!name || !price) {
-    return c.json({ error: 'name and price are required' }, 400);
+  if (!name || typeof price !== 'number') {
+    return c.json({ error: 'name and numeric price are required' }, 400);
   }
 
-  // TODO: Create product in database
-  const productId = `prd_${Date.now()}`;
+  if (!serviceId) {
+    return c.json({ error: 'serviceId is required' }, 400);
+  }
 
-  return c.json({
-    success: true,
-    data: {
-      id: productId,
-      name,
-      description,
-      price,
-      category,
-      stock: stock || 0,
-      images: images || [],
-      createdBy: auth.userId,
-      createdAt: new Date().toISOString()
-    }
-  });
+  try {
+    const prisma = getPrisma(c);
+
+    const productRecord = await prisma.product.create({
+      data: {
+        name,
+        description: description || null,
+        price,
+        stock: stock ?? 0,
+        images: images || [],
+        metadata: {
+          ...(metadata || {}),
+          category: category || (metadata ? metadata.category : undefined) || null,
+          createdBy: auth.userId,
+        },
+        serviceId,
+      },
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        ...productRecord,
+        category: category || parseCategory(metadata),
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to create product' }, 500);
+  }
 });
 
 // [ADMIN] Update product
@@ -108,17 +167,50 @@ product.put('/:id', requireScope('product:admin'), async (c) => {
   const body = await c.req.json();
   const auth = c.get('auth') as AuthContext;
 
-  // TODO: Update product in database
-  return c.json({
-    success: true,
-    message: `Product ${id} updated successfully`,
-    data: {
-      id,
-      ...body,
-      updatedBy: auth.userId,
-      updatedAt: new Date().toISOString()
+  try {
+    const prisma = getPrisma(c);
+
+    const existing = await prisma.product.findUnique({ where: { id } });
+    if (!existing) {
+      return c.json({ error: 'Product not found' }, 404);
     }
-  });
+
+    let updatedMetadata = {
+      ...(existing.metadata as Record<string, any> | null | undefined),
+      ...(body.metadata || {}),
+    } as Record<string, any> | undefined;
+
+    if (body.category !== undefined) {
+      if (!updatedMetadata) {
+        updatedMetadata = {};
+      }
+      updatedMetadata.category = body.category;
+    }
+
+    const productRecord = await prisma.product.update({
+      where: { id },
+      data: {
+        name: body.name ?? undefined,
+        description: body.description ?? undefined,
+        price: body.price ?? undefined,
+        stock: body.stock ?? undefined,
+        images: body.images ?? undefined,
+        isActive: body.isActive ?? undefined,
+        metadata: updatedMetadata ? { ...updatedMetadata, updatedBy: auth.userId } : undefined,
+      },
+    });
+
+    return c.json({
+      success: true,
+      message: `Product ${id} updated successfully`,
+      data: {
+        ...productRecord,
+        category: parseCategory(productRecord.metadata),
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to update product' }, 500);
+  }
 });
 
 // [ADMIN] Delete product
@@ -126,51 +218,90 @@ product.delete('/:id', requireScope('product:admin'), async (c) => {
   const id = c.req.param('id');
   const auth = c.get('auth') as AuthContext;
 
-  // TODO: Delete product from database
-  return c.json({
-    success: true,
-    message: `Product ${id} deleted successfully`,
-    data: {
-      id,
-      deletedBy: auth.userId,
-      deletedAt: new Date().toISOString()
+  try {
+    const prisma = getPrisma(c);
+
+    const existing = await prisma.product.findUnique({ where: { id } });
+    if (!existing) {
+      return c.json({ error: 'Product not found' }, 404);
     }
-  });
+
+    const metadata = {
+      ...(existing.metadata as Record<string, any> | null | undefined),
+      deletedBy: auth.userId,
+      deletedAt: new Date().toISOString(),
+    };
+
+    const productRecord = await prisma.product.update({
+      where: { id },
+      data: {
+        isActive: false,
+        metadata,
+      },
+    });
+
+    return c.json({
+      success: true,
+      message: `Product ${id} deleted successfully`,
+      data: {
+        ...productRecord,
+        category: parseCategory(productRecord.metadata),
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to delete product' }, 500);
+  }
 });
 
 // [ADMIN] List all products
 product.get('/', requireScope('product:admin'), async (c) => {
   const page = parseInt(c.req.query('page') || '1');
   const limit = parseInt(c.req.query('limit') || '50');
+  const serviceId = c.req.query('serviceId');
+  const isActive = c.req.query('isActive');
+  const skip = Math.max(page - 1, 0) * limit;
 
-  // TODO: Query database with pagination
-  return c.json({
-    success: true,
-    data: {
-      products: [
-        {
-          id: 'prd_001',
-          name: 'Product 1',
-          price: 2999,
-          stock: 10,
-          category: 'electronics'
-        },
-        {
-          id: 'prd_002',
-          name: 'Product 2',
-          price: 4999,
-          stock: 5,
-          category: 'books'
-        }
-      ],
-      pagination: {
-        page,
-        limit,
-        total: 2,
-        totalPages: 1
-      }
+  try {
+    const prisma = getPrisma(c);
+
+    const where: Prisma.ProductWhereInput = {};
+
+    if (serviceId) {
+      where.serviceId = serviceId;
     }
-  });
+
+    if (isActive !== undefined) {
+      where.isActive = isActive !== 'false';
+    }
+
+    const [products, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.product.count({ where }),
+    ]);
+
+    return c.json({
+      success: true,
+      data: {
+        products: products.map((productRecord) => ({
+          ...productRecord,
+          category: parseCategory(productRecord.metadata),
+        })),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to list products' }, 500);
+  }
 });
 
 export default product;

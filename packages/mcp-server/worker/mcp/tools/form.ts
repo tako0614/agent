@@ -1,6 +1,17 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
 import type { McpVariables, AuthContext } from '../../types';
+import type { PrismaClient, Prisma } from '@prisma/client';
+
+type PrismaContext = PrismaClient | undefined;
+
+function getPrisma(c: any): PrismaClient {
+  const prisma = c.get('prisma') as PrismaContext;
+  if (!prisma) {
+    throw new Error('Database client not available');
+  }
+  return prisma;
+}
 
 const form = new Hono<{ Variables: McpVariables }>();
 
@@ -8,47 +19,24 @@ const form = new Hono<{ Variables: McpVariables }>();
 form.get('/:id', async (c) => {
   const id = c.req.param('id');
 
-  // TODO: Query database for form
-  return c.json({
-    success: true,
-    data: {
-      id,
-      title: 'Sample Contact Form',
-      description: 'Please fill out this form to contact us',
-      fields: [
-        {
-          id: 'name',
-          type: 'text',
-          label: 'Your Name',
-          required: true,
-          placeholder: 'John Doe'
-        },
-        {
-          id: 'email',
-          type: 'email',
-          label: 'Email Address',
-          required: true,
-          placeholder: 'john@example.com'
-        },
-        {
-          id: 'message',
-          type: 'textarea',
-          label: 'Message',
-          required: true,
-          placeholder: 'Your message here...'
-        },
-        {
-          id: 'subscribe',
-          type: 'checkbox',
-          label: 'Subscribe to newsletter',
-          required: false
-        }
-      ],
-      submitButtonText: 'Submit',
-      successMessage: 'Thank you for your submission!',
-      status: 'active'
+  try {
+    const prisma = getPrisma(c);
+    const formRecord = await prisma.form.findUnique({ where: { id } });
+
+    if (!formRecord || !formRecord.isActive) {
+      return c.json({ error: 'Form not found' }, 404);
     }
-  });
+
+    return c.json({
+      success: true,
+      data: {
+        ...formRecord,
+        fields: formRecord.fields,
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to fetch form' }, 500);
+  }
 });
 
 // [USER] Submit form
@@ -57,27 +45,39 @@ form.post('/:id/submit', requireScope('form:submit'), async (c) => {
   const body = await c.req.json();
   const auth = c.get('auth') as AuthContext;
 
-  const { responses } = body;
+  const responses = body.responses ?? body.data;
 
   if (!responses) {
     return c.json({ error: 'responses object is required' }, 400);
   }
 
-  // TODO: Validate form and save submission to database
-  const submissionId = `sub_${Date.now()}`;
+  try {
+    const prisma = getPrisma(c);
 
-  return c.json({
-    success: true,
-    message: 'Form submitted successfully',
-    data: {
-      id: submissionId,
-      formId: id,
-      responses,
-      userId: auth.userId,
-      userEmail: auth.user.email,
-      submittedAt: new Date().toISOString()
+    const formRecord = await prisma.form.findUnique({ where: { id } });
+    if (!formRecord || !formRecord.isActive) {
+      return c.json({ error: 'Form not found' }, 404);
     }
-  });
+
+    const submission = await prisma.formSubmission.create({
+      data: {
+        formId: id,
+        data: {
+          responses,
+          userId: auth.userId,
+          userEmail: auth.user.email,
+        },
+      },
+    });
+
+    return c.json({
+      success: true,
+      message: 'Form submitted successfully',
+      data: submission,
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to submit form' }, 500);
+  }
 });
 
 // [ADMIN] Create form
@@ -85,32 +85,39 @@ form.post('/create', requireScope('form:admin'), async (c) => {
   const body = await c.req.json();
   const auth = c.get('auth') as AuthContext;
 
-  const { title, description, fields, settings } = body;
+  const { title, description, fields, settings, serviceId } = body;
 
   if (!title || !fields || !Array.isArray(fields)) {
     return c.json({ error: 'title and fields array are required' }, 400);
   }
 
-  // TODO: Create form in database
-  const formId = `frm_${Date.now()}`;
+  if (!serviceId) {
+    return c.json({ error: 'serviceId is required' }, 400);
+  }
 
-  return c.json({
-    success: true,
-    data: {
-      id: formId,
-      title,
-      description,
-      fields,
-      settings: settings || {
-        submitButtonText: 'Submit',
-        successMessage: 'Thank you for your submission!',
-        allowMultipleSubmissions: false
+  try {
+    const prisma = getPrisma(c);
+
+    const formRecord = await prisma.form.create({
+      data: {
+        name: title,
+        description: description || null,
+        fields: {
+          fields,
+          settings: settings || null,
+        },
+        isActive: true,
+        serviceId,
       },
-      status: 'active',
-      createdBy: auth.userId,
-      createdAt: new Date().toISOString()
-    }
-  });
+    });
+
+    return c.json({
+      success: true,
+      data: formRecord,
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to create form' }, 500);
+  }
 });
 
 // [ADMIN] Update form
@@ -119,17 +126,33 @@ form.put('/:id', requireScope('form:admin'), async (c) => {
   const body = await c.req.json();
   const auth = c.get('auth') as AuthContext;
 
-  // TODO: Update form in database
-  return c.json({
-    success: true,
-    message: `Form ${id} updated successfully`,
-    data: {
-      id,
-      ...body,
-      updatedBy: auth.userId,
-      updatedAt: new Date().toISOString()
-    }
-  });
+  try {
+    const prisma = getPrisma(c);
+
+    const formRecord = await prisma.form.update({
+      where: { id },
+      data: {
+        name: body.title ?? undefined,
+        description: body.description ?? undefined,
+        fields:
+          body.fields || body.settings
+            ? {
+                ...(body.fields ? { fields: body.fields } : {}),
+                ...(body.settings ? { settings: body.settings } : {}),
+              }
+            : undefined,
+        isActive: body.status ? body.status === 'active' : undefined,
+      },
+    });
+
+    return c.json({
+      success: true,
+      message: `Form ${id} updated successfully`,
+      data: formRecord,
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to update form' }, 500);
+  }
 });
 
 // [ADMIN] List form submissions
@@ -137,71 +160,77 @@ form.get('/:id/submissions', requireScope('form:admin'), async (c) => {
   const id = c.req.param('id');
   const page = parseInt(c.req.query('page') || '1');
   const limit = parseInt(c.req.query('limit') || '50');
+  const offset = Math.max(page - 1, 0) * limit;
 
-  // TODO: Query database for submissions
-  return c.json({
-    success: true,
-    data: {
-      formId: id,
-      submissions: [
-        {
-          id: 'sub_001',
-          responses: {
-            name: 'John Doe',
-            email: 'john@example.com',
-            message: 'Hello, I have a question...'
-          },
-          userEmail: 'john@example.com',
-          submittedAt: '2025-10-01T10:00:00Z'
+  try {
+    const prisma = getPrisma(c);
+
+    const [submissions, total] = await Promise.all([
+      prisma.formSubmission.findMany({
+        where: { formId: id },
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      prisma.formSubmission.count({ where: { formId: id } }),
+    ]);
+
+    return c.json({
+      success: true,
+      data: {
+        formId: id,
+        submissions,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1,
         },
-        {
-          id: 'sub_002',
-          responses: {
-            name: 'Jane Smith',
-            email: 'jane@example.com',
-            message: 'I would like more information...'
-          },
-          userEmail: 'jane@example.com',
-          submittedAt: '2025-10-02T14:00:00Z'
-        }
-      ],
-      pagination: {
-        page,
-        limit,
-        total: 2,
-        totalPages: 1
-      }
-    }
-  });
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to fetch submissions' }, 500);
+  }
 });
 
 // [ADMIN] List all forms
 form.get('/', requireScope('form:admin'), async (c) => {
   const status = c.req.query('status');
+  const serviceId = c.req.query('serviceId');
 
-  // TODO: Query database for forms
-  return c.json({
-    success: true,
-    data: {
-      forms: [
-        {
-          id: 'frm_001',
-          title: 'Contact Form',
-          status: 'active',
-          submissionCount: 15,
-          createdAt: '2025-09-01T10:00:00Z'
-        },
-        {
-          id: 'frm_002',
-          title: 'Feedback Form',
-          status: 'active',
-          submissionCount: 8,
-          createdAt: '2025-09-15T10:00:00Z'
-        }
-      ],
-      filters: { status }
+  try {
+    const prisma = getPrisma(c);
+    const where: Prisma.FormWhereInput = {};
+
+    if (status) {
+      where.isActive = status === 'active';
     }
-  });
+
+    if (serviceId) {
+      where.serviceId = serviceId;
+    }
+
+    const forms = await prisma.form.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        submissions: true,
+      },
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        forms: forms.map(({ submissions, ...formRecord }) => ({
+          ...formRecord,
+          submissionCount: submissions.length,
+        })),
+        filters: { status: status || null, serviceId: serviceId || null },
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to list forms' }, 500);
+  }
 });
 
 // [ADMIN] Delete form
@@ -209,16 +238,38 @@ form.delete('/:id', requireScope('form:admin'), async (c) => {
   const id = c.req.param('id');
   const auth = c.get('auth') as AuthContext;
 
-  // TODO: Delete form from database
-  return c.json({
-    success: true,
-    message: `Form ${id} deleted successfully`,
-    data: {
-      id,
-      deletedBy: auth.userId,
-      deletedAt: new Date().toISOString()
+  try {
+    const prisma = getPrisma(c);
+
+    const existing = await prisma.form.findUnique({ where: { id } });
+    if (!existing) {
+      return c.json({ error: 'Form not found' }, 404);
     }
-  });
+
+    const fields = {
+      ...(existing.fields as Record<string, any> | null | undefined),
+      archivedAt: new Date().toISOString(),
+    };
+
+    const formRecord = await prisma.form.update({
+      where: { id },
+      data: {
+        isActive: false,
+        fields,
+      },
+    });
+
+    return c.json({
+      success: true,
+      message: `Form ${id} deleted successfully`,
+      data: {
+        ...formRecord,
+        deletedBy: auth.userId,
+      },
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to delete form' }, 500);
+  }
 });
 
 export default form;
