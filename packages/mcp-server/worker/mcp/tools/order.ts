@@ -1,8 +1,7 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
 import type { McpVariables, AuthContext } from '../../types';
-import type { PrismaClient, Prisma } from '@prisma/client';
-import { OrderStatus } from '@prisma/client';
+import { PrismaClient, Prisma, OrderStatus } from '@agent/database';
 
 type PrismaContext = PrismaClient | undefined;
 
@@ -251,7 +250,8 @@ order.post('/:id/cancel', requireScope('order:cancel'), async (c) => {
       return c.json({ error: 'You do not have permission to cancel this order' }, 403);
     }
 
-    if (![OrderStatus.PENDING, OrderStatus.PAID].includes(orderRecord.status)) {
+    const cancellableStatuses: OrderStatus[] = [OrderStatus.PENDING, OrderStatus.PAID];
+    if (!cancellableStatuses.includes(orderRecord.status)) {
       return c.json({ error: 'Order cannot be cancelled in its current status' }, 400);
     }
 

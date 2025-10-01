@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
 import type { McpVariables, AuthContext } from '../../types';
-import type { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@agent/database';
 
 type PrismaContext = PrismaClient | undefined;
 

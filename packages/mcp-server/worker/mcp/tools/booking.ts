@@ -1,8 +1,7 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
 import type { McpVariables, AuthContext } from '../../types';
-import type { PrismaClient } from '@prisma/client';
-import { BookingStatus } from '@prisma/client';
+import { PrismaClient, BookingStatus } from '@agent/database';
 
 type PrismaContext = PrismaClient | undefined;
 
@@ -99,7 +98,7 @@ booking.get('/available-slots', async (c) => {
           lt: dayEnd,
         },
         status: {
-          notIn: [BookingStatus.CANCELLED],
+          notIn: ['CANCELLED'],
         },
       },
       orderBy: { startTime: 'asc' },
@@ -119,7 +118,7 @@ booking.get('/available-slots', async (c) => {
     for (let current = startMinutes; current + slotDuration <= endMinutes; current += slotDuration) {
       const slotStart = createDateFromParts(date, current);
       const slotEnd = createDateFromParts(date, current + slotDuration);
-      const conflict = existingBookings.some((booking) => {
+      const conflict = existingBookings.some((booking: any) => {
         return booking.startTime < slotEnd && booking.endTime > slotStart;
       });
 

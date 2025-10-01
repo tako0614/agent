@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { requireScope } from '../middleware';
 import type { McpVariables, AuthContext } from '../../types';
-import type { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@agent/database';
 
 type PrismaContext = PrismaClient | undefined;
 
@@ -49,15 +49,21 @@ product.get('/search', async (c) => {
     }
 
     if (category) {
-      where.AND = [
-        ...(where.AND || []),
-        {
-          metadata: {
-            path: ['category'],
-            equals: category,
-          },
+      const existingAnd = where.AND;
+      const categoryFilter = {
+        metadata: {
+          path: ['category'],
+          equals: category,
         },
-      ];
+      };
+      
+      if (Array.isArray(existingAnd)) {
+        where.AND = [...existingAnd, categoryFilter];
+      } else if (existingAnd) {
+        where.AND = [existingAnd, categoryFilter];
+      } else {
+        where.AND = [categoryFilter];
+      }
     }
 
     const [products, total] = await Promise.all([
