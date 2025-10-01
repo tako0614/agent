@@ -1,35 +1,59 @@
 import { MiddlewareHandler } from 'hono';
-import { verifyAiServiceToken, hasScope } from '../auth/verify';
+import { PrismaClient } from '@prisma/client';
+import { verifyMcpAccessToken, hasScope } from '../auth/verify';
 
 /**
  * Authentication middleware for MCP tools
- * Supports both AI Service tokens and MCP admin sessions
+ * Supports both MCP access tokens and MCP admin sessions
  */
 export function middleware(handler: any): any {
   const app = handler;
 
   // Apply auth middleware to all routes
   app.use('/*', async (c: any, next: any) => {
-    // Check for AI Service token
+    const databaseUrl = c.env.DATABASE_URL;
+    if (!databaseUrl) {
+      return c.json({ error: 'Database not configured' }, 500);
+    }
+
+    const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+
+    // Check for MCP Access Token (from AI Service)
     const authHeader = c.req.header('Authorization');
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
       
       try {
-        const publicKey = c.env.AI_SERVICE_PUBLIC_KEY || '';
-        const payload = await verifyAiServiceToken(token, publicKey);
+        const payload = await verifyMcpAccessToken(prisma, token);
+        
+        // Get user info from database
+        const user = await prisma.user.findUnique({
+          where: { id: payload.userId }
+        });
+
+        if (!user) {
+          await prisma.$disconnect();
+          return c.json({ error: 'User not found' }, 401);
+        }
         
         // Set user context from token
         c.set('auth', {
-          type: 'ai-service',
-          userId: payload.sub,
+          type: 'mcp-token',
+          userId: payload.userId,
           scope: payload.scope,
-          user: payload.user
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name || ''
+          }
         });
         
+        c.set('prisma', prisma);
         await next();
+        await prisma.$disconnect();
         return;
       } catch (error) {
+        await prisma.$disconnect();
         return c.json({ error: 'Invalid token' }, 401);
       }
     }
@@ -56,13 +80,17 @@ export function middleware(handler: any): any {
           }
         });
         
+        c.set('prisma', prisma);
         await next();
+        await prisma.$disconnect();
         return;
       } catch (error) {
+        await prisma.$disconnect();
         return c.json({ error: 'Invalid session' }, 401);
       }
     }
 
+    await prisma.$disconnect();
     // No valid authentication
     return c.json({ error: 'Authentication required' }, 401);
   });

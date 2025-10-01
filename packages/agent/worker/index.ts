@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import api from './api';
-import mcp from './mcp';
 import auth from './api/auth';
 
 type Bindings = {
@@ -16,6 +15,7 @@ type Bindings = {
   LINE_CLIENT_SECRET?: string;
   LINE_REDIRECT_URI?: string;
   FRONTEND_URL?: string;
+  MCP_SERVER_URL?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -30,7 +30,6 @@ app.use('/*', cors({
 
 // Mount sub-apps
 app.route('/api', api);
-app.route('/mcp', mcp);
 app.route('/auth', auth);
 
 // Root endpoint
@@ -40,7 +39,6 @@ app.get('/', (c) => {
     version: '0.1.0',
     endpoints: {
       api: '/api',
-      mcp: '/mcp',
       auth: '/auth',
       health: '/api/health'
     }

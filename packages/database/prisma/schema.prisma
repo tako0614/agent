@@ -23,8 +23,45 @@ model User {
   services      Service[]
   orders        Order[]
   conversations Conversation[]
+  sessions      Session[]
+  mcpTokens     McpAccessToken[]
 
   @@map("users")
+}
+
+// Session management for OAuth authentication
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("sessions")
+}
+
+// MCP Access Token for AI Service <-> MCP Server communication
+model McpAccessToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  scope     String[] // Permissions: booking:read, product:admin, etc.
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("mcp_access_tokens")
 }
 
 model Agent {

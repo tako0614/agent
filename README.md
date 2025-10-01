@@ -116,10 +116,6 @@ GOOGLE_REDIRECT_URI=http://localhost:8787/auth/callback/google
 STRIPE_SECRET_KEY=sk_test_your-stripe-secret-key
 STRIPE_WEBHOOK_SECRET=whsec_your-webhook-secret
 
-# MCP Token Signing (RS256秘密鍵)
-# 生成方法: openssl genrsa -out private_key.pem 2048
-MCP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
-
 # MCP Server URL
 MCP_SERVER_URL=http://localhost:8788
 ```
@@ -131,11 +127,7 @@ MCP_GOOGLE_CLIENT_ID=your-google-client-id
 MCP_GOOGLE_CLIENT_SECRET=your-google-client-secret
 MCP_GOOGLE_REDIRECT_URI=http://localhost:8788/auth/callback/google
 
-# AI Service Public Key (RS256公開鍵)
-# 生成方法: openssl rsa -in private_key.pem -pubout -out public_key.pem
-AI_SERVICE_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
-
-# Database URL
+# Database URL (shared with AI Service)
 DATABASE_URL="postgresql://user:password@localhost:5432/agent"
 
 # CORS設定
@@ -157,20 +149,34 @@ npm run db:seed
 
 ### 4. 開発サーバーの起動
 
+**重要**: AIサービスとMCPサーバーは独立したサービスのため、**両方を起動する必要があります**。
+
+#### ターミナル1: AIサービスを起動
 ```powershell
-# AIサービスを起動 (ポート 8787)
 cd packages/agent
 npm run dev
+```
+- AIサービス Worker: http://localhost:8787
+- フロントエンド: http://localhost:5173 (Viteが別ポートで起動)
 
-# 別のターミナルでMCPサーバーを起動 (ポート 8788)
+#### ターミナル2: MCPサーバーを起動
+```powershell
 cd packages/mcp-server
 npm run dev
 ```
+- MCPサーバー: http://localhost:8788
 
-これにより以下が起動します:
-- AIサービス (フロントエンド + API): http://localhost:8787
-- MCPサーバー (ツールAPI): http://localhost:8788
-- Prisma Studio: http://localhost:5555 (別ターミナルで`npm run db:studio`)
+#### ターミナル3: Prisma Studio (オプション)
+```powershell
+cd packages/database
+npm run studio
+```
+- Prisma Studio: http://localhost:5555
+
+これで以下のサービスが利用可能になります:
+- **フロントエンド**: http://localhost:5173
+- **AI Service API**: http://localhost:8787/api/*
+- **MCP Tools API**: http://localhost:8788/tools/*
 
 ### 5. ビルド
 

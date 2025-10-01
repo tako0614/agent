@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { createAuthService } from '../auth';
 import { generateMcpToken } from '../auth/mcp-token';
+import { PrismaClient } from '@prisma/client';
 
 type Bindings = {
   GOOGLE_CLIENT_ID?: string;
@@ -11,7 +12,7 @@ type Bindings = {
   LINE_CLIENT_SECRET?: string;
   LINE_REDIRECT_URI?: string;
   FRONTEND_URL?: string;
-  MCP_PRIVATE_KEY?: string; // RSA private key for signing MCP tokens
+  DATABASE_URL?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -321,18 +322,20 @@ app.post('/mcp-token', async (c) => {
     return c.json({ error: 'Invalid session' }, 401);
   }
 
-  const privateKey = c.env.MCP_PRIVATE_KEY;
-  if (!privateKey) {
-    return c.json({ error: 'MCP token generation not configured' }, 500);
+  const databaseUrl = c.env.DATABASE_URL;
+  if (!databaseUrl) {
+    return c.json({ error: 'Database not configured' }, 500);
   }
 
   try {
+    const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    
     const token = await generateMcpToken(
-      userInfo.id,
-      userInfo.email,
-      userInfo.name,
-      privateKey
+      prisma,
+      userInfo.id
     );
+
+    await prisma.$disconnect();
 
     return c.json({
       token,

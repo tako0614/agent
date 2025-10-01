@@ -1,28 +1,13 @@
-import * as jose from 'jose';
-
-export interface McpTokenPayload {
-  iss: string; // Issuer: ai-service.example.com
-  sub: string; // Subject: user ID
-  aud: string; // Audience: mcp-api.example.com
-  exp: number; // Expiration time
-  iat: number; // Issued at
-  scope: string[]; // Permissions
-  user: {
-    id: string;
-    email: string;
-    name: string;
-  };
-}
+import { randomBytes } from 'crypto';
+import { PrismaClient } from '@prisma/client';
 
 /**
  * Generate MCP access token for authenticated user
- * This token will be used to access MCP Server tools
+ * This token will be stored in database and used to access MCP Server tools
  */
 export async function generateMcpToken(
+  prisma: PrismaClient,
   userId: string,
-  userEmail: string,
-  userName: string,
-  privateKeyPem: string,
   scope: string[] = [
     'booking:read',
     'booking:create',
@@ -36,33 +21,18 @@ export async function generateMcpToken(
   ]
 ): Promise<string> {
   try {
-    // Import private key for signing
-    const privateKey = await jose.importPKCS8(privateKeyPem, 'RS256');
+    // Generate secure random token
+    const token = randomBytes(32).toString('base64url');
 
-    // Create JWT payload
-    const payload: McpTokenPayload = {
-      iss: 'ai-service.example.com',
-      sub: userId,
-      aud: 'mcp-api.example.com',
-      exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour expiration
-      iat: Math.floor(Date.now() / 1000),
-      scope,
-      user: {
-        id: userId,
-        email: userEmail,
-        name: userName
+    // Store token in database
+    await prisma.mcpAccessToken.create({
+      data: {
+        userId,
+        token,
+        scope,
+        expiresAt: new Date(Date.now() + 3600 * 1000), // 1 hour
       }
-    };
-
-    // Sign and generate JWT
-    const token = await new jose.SignJWT({ ...payload } as any)
-      .setProtectedHeader({ alg: 'RS256' })
-      .setIssuer(payload.iss)
-      .setSubject(payload.sub)
-      .setAudience(payload.aud)
-      .setExpirationTime(payload.exp)
-      .setIssuedAt(payload.iat)
-      .sign(privateKey);
+    });
 
     return token;
   } catch (error) {
@@ -75,10 +45,8 @@ export async function generateMcpToken(
  * Generate admin scope token (for admin users)
  */
 export async function generateAdminMcpToken(
-  userId: string,
-  userEmail: string,
-  userName: string,
-  privateKeyPem: string
+  prisma: PrismaClient,
+  userId: string
 ): Promise<string> {
   const adminScope = [
     'booking:*',
@@ -91,5 +59,58 @@ export async function generateAdminMcpToken(
     'form:admin'
   ];
 
-  return generateMcpToken(userId, userEmail, userName, privateKeyPem, adminScope);
+  return generateMcpToken(prisma, userId, adminScope);
+}
+
+/**
+ * Verify MCP access token
+ */
+export async function verifyMcpToken(
+  prisma: PrismaClient,
+  token: string
+): Promise<{ userId: string; scope: string[] } | null> {
+  try {
+    const mcpToken = await prisma.mcpAccessToken.findUnique({
+      where: { token },
+      include: { user: true }
+    });
+
+    if (!mcpToken) {
+      return null;
+    }
+
+    // Check expiration
+    if (mcpToken.expiresAt < new Date()) {
+      // Delete expired token
+      await prisma.mcpAccessToken.delete({
+        where: { id: mcpToken.id }
+      });
+      return null;
+    }
+
+    return {
+      userId: mcpToken.userId,
+      scope: mcpToken.scope
+    };
+  } catch (error) {
+    console.error('Error verifying MCP token:', error);
+    return null;
+  }
+}
+
+/**
+ * Revoke MCP access token
+ */
+export async function revokeMcpToken(
+  prisma: PrismaClient,
+  token: string
+): Promise<boolean> {
+  try {
+    await prisma.mcpAccessToken.delete({
+      where: { token }
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }

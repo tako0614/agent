@@ -8,7 +8,6 @@ type Bindings = {
   MCP_GOOGLE_CLIENT_ID?: string;
   MCP_GOOGLE_CLIENT_SECRET?: string;
   MCP_GOOGLE_REDIRECT_URI?: string;
-  AI_SERVICE_PUBLIC_KEY?: string;
   ALLOWED_ORIGINS?: string;
 };
 

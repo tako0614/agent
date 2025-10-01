@@ -1,48 +1,40 @@
-import * as jose from 'jose';
+import { PrismaClient } from '@prisma/client';
 
 export interface TokenPayload {
-  iss: string;
-  sub: string;
-  aud: string;
-  exp: number;
-  iat: number;
+  userId: string;
   scope: string[];
-  user: {
-    id: string;
-    email: string;
-    name: string;
-  };
 }
 
 /**
- * Verify AI Service JWT Token
+ * Verify MCP Access Token from database
  */
-export async function verifyAiServiceToken(
-  token: string,
-  publicKeyPem: string
+export async function verifyMcpAccessToken(
+  prisma: PrismaClient,
+  token: string
 ): Promise<TokenPayload> {
   try {
-    // Import public key
-    const publicKey = await jose.importSPKI(publicKeyPem, 'RS256');
-
-    // Verify JWT
-    const { payload } = await jose.jwtVerify(token, publicKey, {
-      issuer: 'ai-service.example.com',
-      audience: 'mcp-api.example.com',
-      algorithms: ['RS256']
+    const mcpToken = await prisma.mcpAccessToken.findUnique({
+      where: { token },
+      include: { user: true }
     });
 
-    // Validate required fields
-    if (!payload.sub || !payload.scope || !Array.isArray(payload.scope)) {
-      throw new Error('Invalid token payload');
+    if (!mcpToken) {
+      throw new Error('Token not found');
     }
 
     // Check expiration
-    if (payload.exp && payload.exp < Date.now() / 1000) {
+    if (mcpToken.expiresAt < new Date()) {
+      // Delete expired token
+      await prisma.mcpAccessToken.delete({
+        where: { id: mcpToken.id }
+      });
       throw new Error('Token expired');
     }
 
-    return payload as unknown as TokenPayload;
+    return {
+      userId: mcpToken.userId,
+      scope: mcpToken.scope
+    };
   } catch (error) {
     console.error('Token verification error:', error);
     throw new Error(error instanceof Error ? error.message : 'Token verification failed');
@@ -53,5 +45,12 @@ export async function verifyAiServiceToken(
  * Verify scope
  */
 export function hasScope(requiredScope: string, userScopes: string[]): boolean {
-  return userScopes.includes(requiredScope);
+  // Check for exact match
+  if (userScopes.includes(requiredScope)) {
+    return true;
+  }
+  
+  // Check for wildcard match (e.g., "booking:*" matches "booking:read")
+  const [resource] = requiredScope.split(':');
+  return userScopes.includes(`${resource}:*`);
 }
