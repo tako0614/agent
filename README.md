@@ -1,149 +1,264 @@
+# AI Service Builder
 
-# Monorepo: agent + database
+AIでネットサービスを誰でも簡単に作れるプラットフォーム
 
-This repository is organized as a monorepo with three packages:
+## ✨ 特徴
 
-- `packages/agent` — Vite + SolidJS + Cloudflare Workers + Hono
-- `packages/database` — Unified database layer with Prisma
+- 🤖 **AIエージェント**: OpenAI + LangGraphを活用した万能AIエージェント
+- 👥 **利用者側機能**: 予約、購入、フォーム送信など、サービスを利用できる
+- 🔧 **管理者側機能**: サービス、商品、フォームの作成・管理ができる
+- 🎯 **専用ツール**: 予約システム、ECサイト、フォームなど用途別ツール
+- 💬 **ChatGPT風UI**: 直感的なチャットインターフェース
+- 🔌 **公開REST API**: 外部アプリケーションからも利用可能
+- 💳 **Stripe決済**: 安全な決済システム統合
+- ☁️ **Cloudflare Workers**: 高速でスケーラブルなエッジコンピューティング
 
-## Features
+## 🛠️ 技術スタック
 
-### Frontend (Vite + SolidJS)
-- ⚡ Vite for fast development
-- 🎯 SolidJS for reactive UI
-- 🎨 Modern CSS with dark/light mode support
+### フロントエンド
+- **Vite 7.x** - 高速ビルドツール
+- **SolidJS 1.8** - リアクティブUIフレームワーク
+- **TailwindCSS 4.x** - モダンなスタイリング
+- **Solid Markdown** - マークダウンレンダリング
 
-### Backend (Cloudflare Workers + Hono)
-- 🚀 High-performance edge computing
-- 🔒 Type-safe API with Hono
-- 🌐 CORS configured for cross-origin requests
-- 📊 Comprehensive logging system
+### バックエンド
+- **Cloudflare Workers** - サーバーレスプラットフォーム
+- **Hono 4.x** - 軽量Webフレームワーク
+- **OpenAI API** - AI機能
+- **LangGraph** - エージェントフレームワーク
+- **Stripe** - 決済処理
 
-### Database (Prisma)
-- 📦 Type-safe database access
-- 🔄 Automatic migrations
-- 🌱 Seeding support
-- 🏗️ PostgreSQL with optional SQLite for development
+### データベース
+- **PostgreSQL** - リレーショナルデータベース
+- **Prisma 5.x** - 型安全なORM
 
-## Quick Start
+## 📁 プロジェクト構成
 
-### 1. Install dependencies
+```
+agent/
+├── packages/
+│   ├── agent/           # フロントエンド + Worker
+│   │   ├── src/         # SolidJSフロントエンド
+│   │   │   ├── components/  # UIコンポーネント
+│   │   │   ├── pages/       # ページ
+│   │   │   ├── types/       # 型定義
+│   │   │   └── utils/       # ユーティリティ
+│   │   └── worker/      # Cloudflare Workers
+│   │       ├── ai/          # AIエージェント
+│   │       ├── api/         # REST API
+│   │       ├── mcp/         # MCPツール
+│   │       └── payment/     # 決済処理
+│   └── database/        # データベース層
+│       ├── prisma/      # Prismaスキーマ
+│       └── src/         # DBサービス
+├── docs/                # ドキュメント
+│   ├── AI_INTEGRATION.md
+│   ├── PAYMENT_INTEGRATION.md
+│   └── SUMMARY.md
+└── package.json         # ルートパッケージ
+```
+
+## 🚀 クイックスタート
+
+### 前提条件
+
+- Node.js 20以上
+- PostgreSQL 14以上
+- npm
+- OpenAI APIキー (AI機能使用時)
+- Stripe APIキー (決済機能使用時)
+
+### 1. インストール
+
 ```powershell
+# リポジトリをクローン
+git clone <repository-url>
+cd agent
+
+# 依存関係のインストール
 npm install
 ```
 
-### 2. Setup database
-```powershell
-# Configure environment variables
-cp packages/database/.env.example packages/database/.env
-# Edit packages/database/.env with your database URL
+### 2. 環境変数の設定
 
-# Generate Prisma client
+**データベース設定** (`packages/database/.env`):
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/agent"
+```
+
+**アプリケーション設定** (`packages/agent/.dev.vars`):
+```env
+# OpenAI API Key (必須)
+OPENAI_API_KEY=sk-your-openai-api-key
+
+# Database URL
+DATABASE_URL="postgresql://user:password@localhost:5432/agent"
+
+# Stripe Keys (決済機能使用時)
+STRIPE_SECRET_KEY=sk_test_your-stripe-secret-key
+STRIPE_WEBHOOK_SECRET=whsec_your-webhook-secret
+```
+
+### 3. データベースのセットアップ
+
+```powershell
+# Prismaクライアント生成
 npm run db:generate
 
-# Push schema to database
+# スキーマをDBにプッシュ
 npm run db:push
 
-# Seed database with sample data (optional)
+# サンプルデータ投入 (オプション)
 npm run db:seed
 ```
 
-### 3. Start development servers
+### 4. 開発サーバーの起動
+
 ```powershell
+# 全サービス起動
 npm run dev
 ```
 
-This will start:
-- Database build watch mode
-- Cloudflare Workers development server (http://localhost:8787)
-- Frontend development server (http://localhost:3000)
+これにより以下が起動します:
+- フロントエンド: http://localhost:8787
+- API: http://localhost:8787/api
+- Prisma Studio: http://localhost:5555 (別ターミナルで`npm run db:studio`)
 
-### 4. Build for production
+### 5. ビルド
+
 ```powershell
-npm run build
-```
-
-## API Endpoints
-
-### Core Endpoints
-- `GET /api/hello` - Hello world message
-- `GET /api/status` - Application status
-
-### User Management
-- `GET /api/users/:id` - Get user by ID
-- `POST /api/users` - Create new user
-
-### Agent Management
-- `GET /api/agents?userId=:id` - Get agents for user
-- `POST /api/agents` - Create new agent
-
-### Task Management
-- `GET /api/tasks?userId=:id` - Get tasks for user
-- `GET /api/tasks?agentId=:id` - Get tasks for agent
-- `POST /api/tasks` - Create new task
-- `PUT /api/tasks/:id` - Update task
-
-### Logging
-- `GET /api/logs?limit=50&level=INFO` - Get system logs
-
-## Project Structure
-
-```
-packages/
-├── agent/                 # Frontend + Workers
-│   ├── src/
-│   │   ├── App.tsx       # Main SolidJS component
-│   │   ├── main.tsx      # Frontend entry point
-│   │   └── worker.ts     # Cloudflare Workers API
-│   ├── index.html        # HTML template
-│   ├── vite.config.ts    # Vite configuration
-│   └── wrangler.toml     # Workers configuration
-└── database/             # Database layer
-    ├── src/
-    │   ├── client.ts     # Prisma client
-    │   ├── services.ts   # Database services
-    │   └── seed.ts       # Seed data
-    ├── prisma/
-    │   └── schema.prisma # Database schema
-    └── .env              # Database configuration
-```
-
-## Development Workflow
-
-1. **Database Changes**: Update `packages/database/prisma/schema.prisma`
-2. **Generate Client**: Run `npm run db:generate`
-3. **Apply Changes**: Run `npm run db:push` (dev) or `npm run db:migrate` (prod)
-4. **Update Services**: Modify `packages/database/src/services.ts` if needed
-5. **Use in Workers**: Import services in `packages/agent/src/worker.ts`
-
-## Deployment
-
-### Database
-1. Set up PostgreSQL database
-2. Configure `DATABASE_URL` environment variable
-3. Run migrations: `npm run db:migrate`
-
-### Cloudflare Workers
-1. Configure Wrangler authentication
-2. Deploy: `npm run build:agent && wrangler deploy`
-
-### Frontend
-1. Build: `npm run build:agent`
-2. Deploy static files to your preferred hosting (Cloudflare Pages, Vercel, etc.)
-
-## Technology Stack
-
-- **Frontend**: Vite + SolidJS + TypeScript
-- **Backend**: Cloudflare Workers + Hono + TypeScript  
-- **Database**: Prisma + PostgreSQL/SQLite
-- **Development**: npm workspaces + concurrently
+# 本番ビルド
 npm run build
 
-# 4) Run built worker locally (Miniflare)
-npm run start
+# デプロイ
+cd packages/agent
+npm run deploy
 ```
 
-Notes
+## 📚 ドキュメント
 
-- Each package also has its own `package.json` so you can work inside a package folder and run `npm run dev` or `npm run build` there directly.
-- To publish the worker to Cloudflare, add a `wrangler.toml` inside `packages/agent` and follow Cloudflare Wrangler docs.
+- [AI統合ガイド](./docs/AI_INTEGRATION.md) - OpenAI/LangGraphの使い方
+- [決済統合ガイド](./docs/PAYMENT_INTEGRATION.md) - Stripe決済の実装方法
+- [MCP利用ガイド](./docs/MCP_USAGE.md) - 利用者・管理者向け機能と外部API統合
+- [プロジェクトサマリー](./docs/SUMMARY.md) - 実装状況と機能一覧
+- [アーキテクチャ](./docs/ARCHITECTURE.md) - システムアーキテクチャ
+- [クイックスタート](./docs/QUICKSTART.md) - 詳細なセットアップガイド
+
+## 🔌 主なAPIエンドポイント
+
+### AI Chat
+- `POST /api/conversations/:id/messages` - メッセージ送信
+- `POST /api/conversations/:id/messages/stream` - ストリーミングレスポンス
+
+### MCP Tools (利用者・管理者共通)
+- `GET /mcp` - API概要とドキュメント
+- `GET /mcp/tools` - 利用可能なツール一覧
+
+#### 予約システム
+- `GET /mcp/tools/booking/available-slots` - [利用者] 予約枠確認
+- `POST /mcp/tools/booking/create` - [利用者] 予約作成
+- `POST /mcp/tools/booking/service/create` - [管理者] サービス作成
+
+#### 商品管理
+- `GET /mcp/tools/product/search` - [利用者] 商品検索
+- `GET /mcp/tools/product/:id` - [利用者] 商品詳細
+- `POST /mcp/tools/product/create` - [管理者] 商品作成
+
+#### 注文管理
+- `POST /mcp/tools/order/create` - [利用者] 注文作成
+- `GET /mcp/tools/order/:id` - [利用者] 注文確認
+- `GET /mcp/tools/order/list` - [管理者] 全注文確認
+
+#### フォーム
+- `GET /mcp/tools/form/:id` - [利用者] フォーム表示
+- `POST /mcp/tools/form/:id/submit` - [利用者] フォーム送信
+- `POST /mcp/tools/form/create` - [管理者] フォーム作成
+
+### 決済
+- `POST /api/orders` - 注文作成
+- `POST /api/checkout/session` - Checkoutセッション作成
+- `POST /api/webhooks/stripe` - Stripeウェブフック
+
+## 🤖 AIツール
+
+AIエージェントが使用できるツール(利用者・管理者両方):
+
+### 1. **booking_tool** - 予約システム
+- **利用者**: 予約枠確認、予約作成、キャンセル
+- **管理者**: サービス作成、全予約管理
+
+### 2. **product_tool** - 商品カタログ
+- **利用者**: 商品検索、閲覧
+- **管理者**: 商品作成、更新、削除
+
+### 3. **order_tool** - 注文管理
+- **利用者**: 注文作成、履歴確認、キャンセル
+- **管理者**: 全注文管理、ステータス更新
+
+### 4. **form_tool** - フォーム
+- **利用者**: フォーム表示、回答送信
+- **管理者**: フォーム作成、回答確認、管理
+
+詳細は[MCP利用ガイド](./docs/MCP_USAGE.md)を参照。
+
+## 🧪 テスト
+
+```powershell
+# ユニットテスト (実装予定)
+npm test
+
+# E2Eテスト (実装予定)
+npm run test:e2e
+```
+
+## 📦 利用可能なコマンド
+
+```powershell
+# 開発
+npm run dev              # 全サービス起動
+npm run dev:agent        # Agentのみ起動
+npm run dev:database     # DBビルド監視
+
+# ビルド
+npm run build            # 全体ビルド
+npm run build:agent      # Agentビルド
+npm run build:database   # DBビルド
+
+# データベース
+npm run db:generate      # Prismaクライアント生成
+npm run db:push          # スキーマプッシュ
+npm run db:seed          # サンプルデータ投入
+npm run db:studio        # Prisma Studio起動
+
+# デプロイ
+cd packages/agent
+npm run deploy           # Cloudflare Workersへデプロイ
+```
+
+## 🎯 次のステップ
+
+- [ ] データベースとの完全統合
+- [ ] ユーザー認証機能
+- [ ] 管理画面の実装
+- [ ] ダッシュボード・分析機能
+- [ ] メール通知
+- [ ] ファイルアップロード
+- [ ] 多言語対応
+
+## 🤝 コントリビューション
+
+コントリビューションを歓迎します!
+
+## 📄 ライセンス
+
+MIT
+
+## 🔗 参考リンク
+
+- [SolidJS Documentation](https://www.solidjs.com/)
+- [Hono Documentation](https://hono.dev/)
+- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
+- [Prisma Documentation](https://www.prisma.io/docs)
+- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [Stripe API Documentation](https://stripe.com/docs/api)
+- [LangGraph Documentation](https://langchain-ai.github.io/langgraphjs/)

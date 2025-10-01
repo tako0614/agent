@@ -18,8 +18,11 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  agents Agent[]
-  tasks  Task[]
+  agents        Agent[]
+  tasks         Task[]
+  services      Service[]
+  orders        Order[]
+  conversations Conversation[]
 
   @@map("users")
 }
@@ -71,6 +74,159 @@ model Log {
   @@map("logs")
 }
 
+model Service {
+  id          String      @id @default(cuid())
+  name        String
+  type        ServiceType
+  description String?
+  config      Json?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+  products Product[]
+  forms    Form[]
+
+  @@map("services")
+}
+
+model Booking {
+  id          String        @id @default(cuid())
+  title       String
+  description String?
+  startTime   DateTime
+  endTime     DateTime
+  status      BookingStatus @default(PENDING)
+  customerName String?
+  customerEmail String?
+  customerPhone String?
+  metadata    Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@map("bookings")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  price       Int      // in cents
+  stock       Int      @default(0)
+  images      String[] // Array of image URLs
+  isActive    Boolean  @default(true)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  orders    OrderItem[]
+
+  @@map("products")
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  customerName    String
+  customerEmail   String
+  customerPhone   String?
+  totalAmount     Int         // in cents
+  status          OrderStatus @default(PENDING)
+  stripePaymentId String?
+  metadata        Json?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items  OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  quantity  Int
+  price     Int      // in cents
+  createdAt DateTime @default(now())
+
+  // Relations
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model Form {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  fields      Json     // Form field configuration
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  serviceId   String
+  service     Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  submissions FormSubmission[]
+
+  @@map("forms")
+}
+
+model FormSubmission {
+  id        String   @id @default(cuid())
+  data      Json     // Form submission data
+  createdAt DateTime @default(now())
+
+  // Relations
+  formId String
+  form   Form   @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@map("form_submissions")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  role      MessageRole
+  content   String
+  metadata  Json?
+  createdAt DateTime    @default(now())
+
+  // Relations
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
 enum TaskStatus {
   PENDING
   IN_PROGRESS
@@ -90,4 +246,31 @@ enum LogLevel {
   INFO
   WARN
   ERROR
+}
+
+enum ServiceType {
+  BOOKING
+  ECOMMERCE
+  FORM
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
 }

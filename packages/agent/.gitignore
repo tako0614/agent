@@ -26,3 +26,4 @@ dist-ssr
 # Wrangler
 .wrangler/
 wrangler.toml.backup
+.dev.vars

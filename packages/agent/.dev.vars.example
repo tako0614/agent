@@ -1,0 +1,34 @@
+# Development environment variables
+# Copy this file to .dev.vars and add your actual API keys
+# .dev.vars is in .gitignore and will not be committed
+
+# OpenAI API Key (required for AI features)
+OPENAI_API_KEY=your-openai-api-key-here
+
+# Database URL (PostgreSQL)
+DATABASE_URL=your-database-url-here
+
+# Stripe Secret Key (for payments)
+STRIPE_SECRET_KEY=your-stripe-secret-key-here
+
+# Stripe Webhook Secret (for webhook verification)
+STRIPE_WEBHOOK_SECRET=your-stripe-webhook-secret-here
+
+# MCP API Key (optional - for protecting admin endpoints)
+# If not set, admin endpoints are accessible without authentication
+MCP_API_KEY=your-mcp-api-key-here
+
+# OAuth - Google
+# Get from https://console.cloud.google.com/apis/credentials
+GOOGLE_CLIENT_ID=your-google-client-id-here
+GOOGLE_CLIENT_SECRET=your-google-client-secret-here
+GOOGLE_REDIRECT_URI=http://localhost:8787/auth/callback/google
+
+# OAuth - LINE
+# Get from https://developers.line.biz/console/
+LINE_CLIENT_ID=your-line-client-id-here
+LINE_CLIENT_SECRET=your-line-client-secret-here
+LINE_REDIRECT_URI=http://localhost:8787/auth/callback/line
+
+# Frontend URL (for redirects after OAuth)
+FRONTEND_URL=http://localhost:5173
