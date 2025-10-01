@@ -5,6 +5,7 @@
     "lib": ["ES2022"],
     "moduleResolution": "bundler",
     "types": ["@cloudflare/workers-types"],
+    "typeRoots": ["./types", "./node_modules/@types"],
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
