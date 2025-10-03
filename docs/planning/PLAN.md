@@ -52,47 +52,28 @@
 └──────────────────────────────────────────────────────────┘
 ```
 
-### 認証アーキテクチャ
+### 認証アーキテクチャ (OAuth 2.1 実装済み)
 
-#### 1. AIサービス側の認証
+#### 1. エンドユーザー認証
 - **対象**: エンドユーザー
-- **方式**: Google OAuth 2.0 / LINE Login
-- **管理**: セッションCookie
+- **方式**: OAuth 2.1 + PKCE
+- **プロバイダー**: Google OAuth 2.0
+- **管理**: JWT Access Token + Refresh Token
 - **機能**: 
   - ユーザー認証・セッション管理
-  - MCPアクセストークン発行
+  - トークンのリフレッシュ
   - AI会話の管理
 
-#### 2. MCPサーバー側の認証
-- **配置**: 別のCloudflare Workersプロジェクト
+#### 2. MCPサーバー間通信
+- **配置**: 別のCloudflare Workersプロジェクト (`packages/mcp-server`)
 - **ドメイン**: 独立したドメイン/サブドメイン
 - **認証方式**:
-  - **方式A**: AIサービス発行トークンの検証(エンドユーザー向け)
-  - **方式B**: 独自Google OAuth(開発者/管理者向け)
+  - OAuth 2.1 Access Token検証
+  - JWTベースの認証
 - **機能**:
   - ビジネスツールの提供
   - データ管理
   - REST API公開
-
-#### 3. 連携の仕組み
-
-**パターンA: エンドユーザーのアクセス**
-```
-User 
-  → AIサービス(Google/LINE認証)
-    → AIエージェント
-      → MCPアクセストークン発行
-        → MCPサーバー(トークン検証)
-          → ツール実行
-```
-
-**パターンB: 開発者/管理者のアクセス**
-```
-Developer/Admin
-  → MCPサーバー(Google認証)
-    → 直接ツールアクセス
-      → 管理機能
-```
 
 ### デプロイメント戦略
 
@@ -128,20 +109,16 @@ Developer/Admin
 - **有効期限**: 1時間(短期)
 - **スコープ**: 最小権限の原則
 
-### 認証フロー
+### 認証フロー (実装済み)
 
-#### エンドユーザー
-1. AIサービスでGoogle/LINE認証
-2. セッション確立
-3. AI操作時にMCPトークン生成
-4. MCPサーバーでトークン検証
-5. ツール実行
-
-#### 開発者/管理者
-1. MCPサーバーでGoogle認証
-2. MCPセッション確立
-3. 直接API呼び出し
-4. 管理機能利用
+#### OAuth 2.1 + PKCE フロー
+1. ユーザーがログインボタンをクリック
+2. PKCE Challenge生成
+3. Google認証ページへリダイレクト
+4. ユーザーが認証を許可
+5. コールバックでAuthorization Code取得
+6. Code VerifierでAccess Token取得
+7. JWTトークンでAPI通信
 
 ## 📦 提供ツール
 
@@ -171,31 +148,35 @@ Developer/Admin
 
 ## 🚀 開発ロードマップ
 
-### Phase 1: 基盤構築 ✅
-- [x] フロントエンド基本UI
-- [x] AIサービス認証(Google/LINE)
+### Phase 1: 基盤構築 ✅ 完了
+- [x] フロントエンド基本UI (Vite + SolidJS)
+- [x] AIサービス認証 (OAuth 2.1実装)
 - [x] 基本的なAPI構造
-- [x] データベーススキーマ
+- [x] データベーススキーマ設計
+- [x] Stripe決済統合
 
-### Phase 2: MCP分離 (進行中)
-- [ ] MCPサーバープロジェクト作成
-- [ ] トークンベース認証実装
-- [ ] MCP独自Google認証
-- [ ] AIサービス⇄MCP連携
+### Phase 2: OAuth 2.1 統合 ✅ 完了
+- [x] OAuth 2.1認証フロー実装
+- [x] PKCE対応
+- [x] トークン管理システム
+- [x] MCPサーバー認証統合
+- [x] レガシー認証の削除
 
-### Phase 3: ツール実装
+### Phase 3: AI エージェント実装 🚧 進行中
+- [x] OpenAI統合
+- [x] チャットモード
+- [x] エージェントモード
+- [x] ツール実行基盤
+- [ ] 会話履歴の永続化
+- [ ] コンテキスト管理の強化
+
+### Phase 4: ビジネスツール実装 📋 計画中
 - [ ] 予約システム完成
 - [ ] 物販システム完成
 - [ ] フォームシステム完成
-- [ ] Stripe決済統合
+- [ ] データベース統合
 
-### Phase 4: AI統合
-- [ ] LangGraphエージェント実装
-- [ ] 自然言語でのツール操作
-- [ ] コンテキスト管理
-- [ ] 会話履歴
-
-### Phase 5: 公開準備
+### Phase 5: 公開準備 🔮 未着手
 - [ ] パフォーマンス最適化
 - [ ] セキュリティ監査
 - [ ] ドキュメント整備
@@ -203,8 +184,17 @@ Developer/Admin
 
 ## 📚 関連ドキュメント
 
+### アーキテクチャ
 - [アーキテクチャ概要](../architecture/ARCHITECTURE.md)
-- [分離アーキテクチャ詳細](../architecture/SEPARATION_ARCHITECTURE.md)
-- [MCP認証システム](../guides/MCP_AUTH.md)
-- [AIサービス認証](../guides/AUTH_INTEGRATION.md)
-- [MCP使用ガイド](../guides/MCP_USAGE.md)
+- [OAuth 2.1 分離アーキテクチャ](../architecture/SEPARATION_ARCHITECTURE_OAUTH2.md)
+
+### 実装ガイド
+- [OAuth 2.1 認証統合](../guides/MCP_AUTH_OAUTH2.md)
+- [AI統合ガイド](../guides/AI_INTEGRATION.md)
+- [決済統合](../guides/PAYMENT_INTEGRATION.md)
+- [クイックスタート](../guides/QUICKSTART.md)
+
+### 実装レポート
+- [認証実装報告](../reports/AUTH_IMPLEMENTATION.md)
+- [アーキテクチャ修正](../reports/ARCHITECTURE_CORRECTION.md)
+- [実装サマリー](../reports/SUMMARY.md)
