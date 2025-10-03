@@ -1,8 +1,41 @@
 ## AI Agent Monorepo 開発計画（PLAN）
 
-本ドキュメントは、Cloudflare Workers 上で動作する MCP（Model Context Protocol）サーバー群と、独立したフロントエンド/Agent サービスを OAuth で連携させるプロダクトの計画書です。
+本ドキュメントは、Cloudflare Workers 上で動作する MCP（Model Context Protocol）サーバー群と、独立したフロントエンド/Agent サービスを OAuth で連携させるプロダmodel AgentMcpLink {
+  id          String   @id @default(cuid())
+  userId      String
+  mcpServerId String
+  enabled     Boolean  @default(true)
+  configJson  Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User      @relation(fields: [userId], references: [id])
+  server      McpServer @relation(fields: [mcpServerId], references: [id])
+  @@unique([userId, mcpServerId])
+}
 
----
+model AgentSession {
+  id          String   @id @default(cuid())
+  userId      String
+  graphState  Json     // LangGraph 状態スナップショット
+  checkpoint  Json?    // チェックポイントデータ
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model ConversationMessage {
+  id          String   @id @default(cuid())
+  sessionId   String
+  role        String   // user/assistant/system/tool
+  content     String   @db.Text
+  metadata    Json?    // ツール呼び出し結果、引用など
+  createdAt   DateTime @default(now())
+  session     AgentSession @relation(fields: [sessionId], references: [id])
+  @@index([sessionId])
+}
+
+enum McpStatus { ACTIVE INACTIVE DEGRADED }
+enum McpAuthType { NONE API_KEY OAUTH }-
 
 ## ビジョン / ゴール
 
@@ -70,15 +103,26 @@
 
 4) Agent（フロント/Worker）
 - 役割：
-	- OAuth で mcp-server と連携
-	- 検索MCPを叩いて候補を取得→ユーザー選択/ポリシーに応じて自動追加
-	- 追加済み MCP の一覧/有効化/無効化/設定
+  - OAuth で mcp-server と連携
+  - **ツール経由で MCP 検索・追加**を実行（エージェント自身が必要なツールを発見・追加）
+  - 追加済み MCP の一覧/有効化/無効化/設定
+  - **LangGraph による状態管理とエージェント実行**（会話/タスク/ツール呼び出し）
+- Agent アーキテクチャ（LangGraph）：
+  - **StateGraph** で会話フローを管理（ユーザー入力 → プラン → ツール実行 → 応答）
+  - **ノード**：LLM 呼び出し、MCP ツール実行、条件分岐、検索/保存ロジック
+  - **エッジ/条件分岐**：ツール結果に応じた次アクション決定
+  - **チェックポイント**：会話履歴やエージェント状態を永続化（KV/DB）
+  - **MCP ツールを LangChain Tool としてラップ**し、LangGraph ノードから呼び出し
+  - **内蔵ツール**（Agent 自身の機能）：
+    - `search_mcp_servers`：検索MCP を呼び出してツール候補を取得
+    - `add_mcp_server`：検索結果から MCP を自分に追加（`AgentMcpLink` 作成）
+    - `list_my_mcp_servers`：現在追加済みの MCP 一覧
+    - `remove_mcp_server`：MCP の削除/無効化
 - UI 要素（MVP）：
-	- 「MCP を探す」モーダル（検索/タグ/プレビュー）
-	- 「追加」ボタンで自動配線（接続情報保存）
-	- 「接続テスト」＆ステータスアイコン
-
----
+  - チャット UI（会話履歴、ストリーミング応答）
+  - エージェント実行状態の可視化（プラン/ツール呼び出し/完了）
+  - **（オプション）MCP 管理 GUI**：検索/追加/削除を手動操作できる UI（ツールと同じ API を使用）
+  - 「接続テスト」＆ステータスアイコン---
 
 ## データモデル（Prisma 下書き）
 
@@ -171,10 +215,16 @@ packages/mcp-server/worker/index.ts（例）
 
 packages/agent/worker/index.ts（例）
 - `GET /api/user/me`
-- `GET /api/mcp/linked`（自分の Agent に紐づく MCP リスト）
-- `POST /api/mcp/link`（検索結果から追加）
-- `POST /api/mcp/unlink`
+- `GET /api/mcp/linked`（自分の Agent に紐づく MCP リスト）※GUI/内蔵ツール共用
+- `POST /api/mcp/search`（mcp-server の検索MCP を呼び出し）※GUI/内蔵ツール共用
+- `POST /api/mcp/link`（検索結果から追加）※GUI/内蔵ツール共用
+- `POST /api/mcp/unlink`（削除/無効化）※GUI/内蔵ツール共用
 - `POST /api/mcp/test`（接続テスト）
+- **`POST /api/agent/chat`**（LangGraph エージェント実行：ストリーミング対応）
+- **`GET /api/agent/state/:sessionId`**（エージェント状態/履歴取得）
+- **`POST /api/agent/interrupt`**（実行中断/ユーザー確認待ち）
+
+備考：`/api/mcp/*` エンドポイントは、LangGraph の内蔵ツール（`search_mcp_servers`, `add_mcp_server` など）と GUI の両方から呼ばれる共通 API。
 
 ---
 
@@ -228,7 +278,14 @@ M3: 検索MCP（Discovery）
 
 M4: Agent 連携
 - [ ] OAuth ログイン（mcp-server Issuer）
-- [ ] 検索 UI → 選択 → `AgentMcpLink` 作成
+- [ ] **LangGraph によるエージェント実装**
+  - [ ] StateGraph 定義（会話フロー、ツール呼び出しノード）
+  - [ ] MCP ツールの LangChain Tool ラッパー（動的読み込み）
+  - [ ] **内蔵ツール実装**（`search_mcp_servers`, `add_mcp_server`, `list_my_mcp_servers`, `remove_mcp_server`）
+  - [ ] チェックポイント/セッション管理（`AgentSession` 永続化）
+  - [ ] ストリーミング応答（SSE または WebSocket）
+- [ ] チャット UI（会話履歴、エージェント状態表示）
+- [ ] **（オプション）MCP 管理 GUI**（検索/追加 UI：ツールと同じ API を使用）
 - [ ] 接続テスト/インジケータ
 
 M5: ハードニング/運用
@@ -242,11 +299,17 @@ M5: ハードニング/運用
 
 - ユニット：ラッパーのツール登録/呼び出し、スキーマバリデーション
 - コンポーネント：Hono ルートの認証ガード、DB リポジトリ
+- **LangGraph エージェント**：
+  - グラフ実行（モックツール、状態遷移）
+  - チェックポイント保存/復元
+  - MCP ツールの動的ロード/実行
+  - **内蔵ツール**（`search_mcp_servers`, `add_mcp_server`）の実行
+  - エラーハンドリング（ツール失敗、LLM タイムアウト）
 - e2e（dev）：
-	- 起動（8787, 8788）→ 管理MCPに登録 → 検索 → Agent で追加
-	- 失敗系：不正 URL、失敗するヘルス、トークン期限切れ
-
----
+  - 起動（8787, 8788）→ 管理MCPに登録
+  - **チャットで「天気ツールを追加して」→ エージェントが検索MCP呼び出し → 候補から自動追加 → 天気ツール使用**
+  - チャット開始 → MCP ツール呼び出し → 応答確認
+  - 失敗系：不正 URL、失敗するヘルス、トークン期限切れ、ツールエラー---
 
 ## リスク/未決事項
 
@@ -260,9 +323,16 @@ M5: ハードニング/運用
 ## 次の一手（開発者 ToDo）
 
 1. Prisma 下書きの確定とマイグレーション作成（`packages/database/prisma/schema.prisma`）
+   - `AgentSession`、`ConversationMessage` を追加してセッション永続化対応
 2. mcp-server 側に Issuer の雛形と `/mcp` ルーターの足場を作成
 3. ラッパー v0（echo ツール）を作り、Workers で動くことを手元検証
-4. Agent UI に「MCP を探す」モーダルのワイヤーを配置（ダミー API で開始）
+4. **Agent 側 LangGraph 実装**（`packages/agent/worker/graph.ts` など）
+   - StateGraph 定義（基本的な会話フロー）
+   - **内蔵ツール実装**（`search_mcp_servers`, `add_mcp_server` など）
+   - MCP ツールのラッパー作成（動的読み込み）
+   - チェックポイント機能の統合
+5. チャット UI プロトタイプ（会話履歴、エージェント実行状態の可視化）
+6. **（オプション）MCP 管理 GUI**（検索/追加 UI：内蔵ツールと同じ API を使用）
 
 ---
 
