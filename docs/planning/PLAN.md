@@ -1,181 +1,277 @@
-# プロジェクト計画 (PLAN)
+## AI Agent Monorepo 開発計画（PLAN）
 
-本ドキュメントは、本モノレポにおける「MCP サーバー群」と「Agent アプリ」の中長期計画をまとめたものです。要求は以下のとおり:
-
-- mcp-server: JavaScript で Workers 風に MCP サーバーを簡単に構築できる「Workers ラッパ」を提供する。さらに「メタ MCP サーバー」を実装する。これは、デプロイ済みの MCP サーバーを管理する MCP サーバー、および MCP サーバーを検索する MCP サーバーを提供する。
-- agent: Agent は MCP サーバー検索を用いてサーバーを自動追加し、各 MCP と連携して様々な操作を行えるようにする。agent と mcp-server は完全に独立したサービスで、OAuth (2.1) によって連携する。
-
-## 1. ゴールと非ゴール
-
-### ゴール
-- Workers 風の DX で MCP サーバーを素早く構築・デプロイできる。
-- メタ MCP サーバーが「MCP サーバーの登録・可視化・検索・健全性確認・OAuth 連携情報の配布」を提供。
-- Agent はメタ MCP サーバーの検索結果から OAuth フローを踏んで安全に接続し、ツール一覧を同期・自動追加できる。
-- 仕様に沿った OAuth 2.1 + PKCE をベースとしたセキュアな連携。
-
-### 非ゴール
-- 独自の認証方式の発明 (標準 OAuth を最優先)。
-- ベンダー固有クラウドに強くロックインする設計 (Cloudflare Workers 優先だが抽象化を保持)。
-
-## 2. 全体アーキテクチャ
-
-```
-┌─────────────────────┐       OAuth 2.1       ┌─────────────────────┐
-│        Agent         │◀────────────────────▶│      MCP Server      │
-│ (SolidJS + Worker)   │                      │  (Workers + Hono)    │
-└──────────┬──────────┘                      └──────────┬──────────┘
-					 │  検索/登録 API                                   │
-					 ▼                                                  ▼
-	 ┌─────────────────────┐                          ┌─────────────────────┐
-	 │ Meta MCP Server     │───管理/検索/健全性───▶  │ Deployed MCP Servers │
-	 │ (Registry/Search)   │◀──登録/メタ情報取得───  │  (複数インスタンス)   │
-	 └─────────────────────┘                          └─────────────────────┘
-```
-
-- Meta MCP Server: MCP サーバーのレジストリ兼検索 API。OAuth メタデータや MCP ツール概要、稼働状況を集約。
-- Deployed MCP Servers: 業務ごとのツールを実装した MCP サーバーたち (Booking/Product/Order/Form など)。
-- Agent: Meta MCP Server を参照し、ユーザーの同意を得て OAuth 連携、ツールの自動追加・同期、実行 UI 提供。
-
-## 3. コンポーネント詳細
-
-### 3.1 MCP Workers ラッパ (JavaScript)
-- 目的: Cloudflare Workers と同様の DX で MCP サーバーを作成可能にする。
-- 形態: `@mcp/worker` 的な薄いフレームワーク層。Hono に中間層を挟み、
-	- ルーティング: `app.mcpTool('name', schema, handler)` のような宣言 API
-	- 認証: Bearer/JWT + OAuth 2.1 メタデータ提供 (RFC 9728/8414)
-	- 型: ツール I/O スキーマの型生成 (zod/valibot 推奨)
-	- ロギング/メトリクス: 監視のための hooks 提供
-- 成果物: `createMcpWorker()` が `fetch(request, env, ctx)` を返し、Workers へデプロイ可能。
-
-### 3.2 Meta MCP Server (管理 + 検索)
-- サービス分割 (同一 Worker 内の論理モジュールでも可):
-	1) Registry: MCP サーバーの登録/更新、OAuth メタデータ、スコープ/ツール一覧のキャッシュ。
-	2) Discovery/Search: タグ/カテゴリ/スコープ/地域などで検索可能なインデックス。
-	3) Health/Status: 稼働確認 (ヘルスチェック、トークン不要でのステータス確認範囲の定義)。
-- 公開 API: 後述の API 仕様参照。
-- データ: `packages/database` を用いて永続化。
-
-### 3.3 Deployed MCP Servers
-- 共通: MCP Workers ラッパを利用し、OAuth 2.1 対応、`/.well-known` エンドポイント提供。
-- 業務: booking/product/order/form などのツール群を提供。
-
-### 3.4 Agent アプリ
-- 機能:
-	- Meta MCP Server から検索→結果を一覧表示→選択すると OAuth 連携フローへ誘導。
-	- 連携後、ツール一覧の自動同期とカテゴリ別 UI 生成。
-	- 実行履歴、エラー表示、トークン更新、切断管理。
-- セキュリティ: OAuth 2.1 + PKCE、refresh token、scope 切り替え UI。
-
-## 4. セキュリティ & OAuth 連携
-
-- RFC 準拠: RFC 9728 (PRM), RFC 8414 (AS Metadata), RFC 8707 (Resource Indicators), RFC 7636 (PKCE), RFC 7591 (Dynamic Client Registration)。
-- 基本フロー:
-	1) Agent はメタ MCP 経由で対象 MCP の `resource_metadata` を取得。
-	2) Authorization Server Metadata を取得し、DCR (必要に応じて) を実行。
-	3) Authorization Code + PKCE によりユーザー同意を取得。
-	4) Access Token (JWT) + Refresh Token を受領し、安全に保管。
-	5) Bearer で MCP Tools API を呼び出し、WWW-Authenticate を適切処理。
-- 権限設計: スコープ設計はツール群に合わせて粒度を揃える (例: `booking:read|write`)。
-
-## 5. API 仕様 (ドラフト)
-
-### 5.1 Meta MCP Server
-
-- `GET /.well-known/oauth-authorization-server` / `GET /.well-known/oauth-protected-resource`
-	- OAuth メタデータ配布 (Agent からの自動検出を許可)
-
-- `POST /registry/servers`
-	- 概要: MCP サーバーの登録 (URL, タグ, カテゴリ, 所有者、公開範囲)
-	- 認証: 管理者/オーナー用トークン
-	- 成功: `201 Created` + 登録レコード
-
-- `GET /registry/servers/:id`
-	- 概要: 登録済み MCP の詳細 (OAuth メタデータ、スコープ、ツールサマリ/キャッシュ)
-
-- `GET /search`
-	- クエリ: `q, tag, scope, category, owner, region, limit, cursor`
-	- 戻り: 検索結果のリスト + ページング
-
-- `GET /health/:id`
-	- 概要: 登録 MCP のヘルス/可用性チェック結果
-
-- `POST /introspect`
-	- 概要: 登録 MCP への token 検証 (委任オプション) またはメタ情報整合性確認
-
-### 5.2 MCP Worker (各サーバー)
-
-- `GET /.well-known/oauth-authorization-server`
-- `GET /.well-known/oauth-protected-resource`
-- `POST /oauth/register` `GET /oauth/authorize` `POST /oauth/token`
-- `GET /mcp` `GET /mcp/tools`
-- `GET/POST /mcp/tools/:tool/...` (ツールごとのルート)
-
-## 6. データモデル (概略)
-
-Prisma 例 (概略、実スキーマは `packages/database/prisma/schema.prisma` で管理):
-
-- `McpServer`
-	- id, baseUrl, name, description, tags[], categories[], ownerId
-	- oauthIssuer, authorizationEndpoint, tokenEndpoint, jwksUri
-	- scopes[], toolsSummary (json), visibility, createdAt, updatedAt
-
-- `McpOwner (User/Org)`
-	- id, type, name, contact
-
-- `AgentConnection`
-	- id, agentUserId, mcpServerId, scopesGranted[], createdAt
-	- tokenSet (encrypted), status (active/revoked), lastSyncAt
-
-- `HealthCheck`
-	- id, mcpServerId, status, latencyMs, checkedAt, detail
-
-## 7. 開発計画 (マイルストーン)
-
-### M1: 基盤整備 (Workers ラッパ最小版 + Meta MCP 骨格)
-- MCP Workers ラッパ: `createMcpWorker()`, `app.mcpTool()` の最小実装
-- `/.well-known` と OAuth 2.1 のメタデータ配信 (固定値/設定ベース)
-- Meta MCP: `POST /registry/servers`, `GET /search` の最小実装
-- Database: `McpServer` スキーマの初版、Prisma generate
-
-### M2: OAuth 連携/実運用準備
-- Authorization Code + PKCE + DCR を安定化
-- スコープ設計と `WWW-Authenticate` 正常化
-- HealthCheck バッチ/エンドポイント実装
-- Meta MCP の詳細画面 API (`GET /registry/servers/:id`)
-
-### M3: Agent 連携と自動追加
-- Agent UI: 検索→選択→OAuth 同意→接続の一連を実装
-- 接続後のツール自動同期と UI 自動生成 (カテゴリ/タグ別)
-- 失効/再認可、トークン更新 UI
-
-### M4: 拡張と運用
-- 監査ログ、メトリクス、通知 (失効/障害)
-- エクスポート/インポート (サーバー登録の JSON)
-- 組織/テナント対応、RBAC
-
-## 8. 実装指針と技術選定
-
-- ランタイム: Cloudflare Workers (Hono)。将来的に Miniflare/Node 互換を視野に抽象化
-- 型/バリデーション: TypeScript + zod/valibot
-- セキュアストレージ: TokenSet は暗号化保管 (Web Crypto / Workers Secrets)
-- Observability: 標準ログ + 低コストヘルスプローブ
-- テスト: e2e は Vitest + Miniflare。または `wrangler dev` を使った統合試験
-
-## 9. リスクと対策
-
-- OAuth 実装の複雑性: 既存コード (packages/mcp-server) を共通ライブラリ化し重複を削減
-- 検索/登録のスパム対策: レート制限、所有者確認、非公開/審査制の導入
-- ベンダーロックイン: fetch ハンドラとストレージを薄く抽象化
-
-## 10. 進め方 (次アクション)
-
-1) Workers ラッパの API デザインを小さく決め、`packages/mcp-server` で PoC 実装
-2) Meta MCP Server の最小 API (`POST /registry/servers`, `GET /search`) を作成
-3) Prisma に `McpServer` モデル追加し `db:generate` 実行
-4) Agent 側に「検索→追加→OAuth 同意」のモック UI を追加
-5) M2 以降で DCR/PKCE/ヘルスチェックなどを段階的に拡充
+本ドキュメントは、Cloudflare Workers 上で動作する MCP（Model Context Protocol）サーバー群と、独立したフロントエンド/Agent サービスを OAuth で連携させるプロダクトの計画書です。
 
 ---
 
-この計画はドラフトです。実装が進むにつれて API とデータモデルはバージョン管理しながら更新します。
+## ビジョン / ゴール
+
+- JavaScript（TypeScript）で「Cloudflare Workers っぽい DX」で MCP サーバーを簡単に作れるラッパー（軽量フレームワーク）を提供する。
+- そのラッパーを使って、まずは 2 種の MCP サーバーを提供する：
+	- 管理MCP（Registry/Orchestrator）：デプロイ済み MCP サーバーを登録・監視・配布
+	- 検索MCP（Discovery/Search）：タグや機能で MCP サーバーを検索
+- Agent は上記 MCP サーバー（管理/検索）に接続し、見つけた MCP サーバーを自動で追加できる。
+- Agent と MCP サーバーは完全に独立したサービスで、OAuth 2.1 により連携する。
+
+成功基準（MVP）
+- Cloudflare Workers 上で動作する MCP サーバーを、ラッパー APIで 50 行未満の実装例で立ち上げられる。
+- 管理MCPが、登録済み MCP サーバーの一覧取得・登録・ヘルスチェックを提供する。
+- 検索MCPが、タグ/キーワード検索で MCP サーバー候補を返す。
+- Agent UI から OAuth でログインし、検索→選択→自身の Agent に MCP を自動追加できる。
+
+---
+
+## 全体アーキテクチャ概要
+
+- Monorepo（npm workspaces）
+	- packages/agent：SolidJS + Vite（フロントエンド）/ Cloudflare Workers（BFF/API, Hono）
+	- packages/database：Prisma クライアント共有
+	- packages/mcp-server：Workers 上の OAuth 2.1 + MCP 実装、および MCP ラッパー
+
+ランタイム/ポート（開発時）
+- Vite dev（frontend）：http://localhost:3000
+- Workers dev（agent）：http://localhost:8787
+- Workers dev（mcp-server）：http://localhost:8788
+
+プロキシ/ルーティング
+- `packages/agent/vite.config.ts` が `/api` を 8787 にプロキシ
+- `run_worker_first = ["/api/*", "/mcp/*", "/auth/*"]`（Workers 優先）
+
+---
+
+## 提供コンポーネントと役割
+
+1) MCP Server ラッパー（Workers 向け）
+- 目的：Workers で MCP ツール/リソース/プロンプトを簡単に定義し、HTTP 経由で MCP を話せるサーバーを最小コードで作れるようにする。
+- 形態：`packages/mcp-server` にフレームワーク（例：`src/framework/*`）。同パッケージの Worker 実装からも利用。
+- 開発者体験（DX）例：
+	- `createMcpWorker({ tools, resources, metadata })` を呼ぶと Hono ルーターを返す
+	- `app.route('/mcp', mcpRouter)` で公開
+	- MCP ハンドラは `async function toolName(args, ctx)` のように記述
+
+2) 管理MCP（Registry/Orchestrator）
+- 役割：
+	- MCP サーバーの登録/更新/無効化
+	- ヘルスチェック（/health かプロトコルで ping）
+	- 配布（クライアントに接続情報やメタデータ提供）
+- 主要ツール（想定）：
+	- `list_servers`（フィルタ: tag, status, owner）
+	- `register_server`（url, name, tags, auth）
+	- `update_server` / `disable_server`
+	- `get_server_info` / `health_check`
+
+3) 検索MCP（Discovery/Search）
+- 役割：
+	- タグ/キーワードで MCP サーバーを検索
+	- レコメンド（人気/最近追加/高評価）
+- 主要ツール（想定）：
+	- `search_servers`（q, tags, limit, cursor）
+	- `suggest_servers`（user_context）
+
+4) Agent（フロント/Worker）
+- 役割：
+	- OAuth で mcp-server と連携
+	- 検索MCPを叩いて候補を取得→ユーザー選択/ポリシーに応じて自動追加
+	- 追加済み MCP の一覧/有効化/無効化/設定
+- UI 要素（MVP）：
+	- 「MCP を探す」モーダル（検索/タグ/プレビュー）
+	- 「追加」ボタンで自動配線（接続情報保存）
+	- 「接続テスト」＆ステータスアイコン
+
+---
+
+## データモデル（Prisma 下書き）
+
+場所：`packages/database/prisma/schema.prisma`
+
+目的：ユーザー、OAuth、MCP サーバーのレジストリ、Agent と MCP のリンクを保持。
+
+候補スキーマ（抜粋・ドラフト）
+
+```prisma
+model User {
+	id           String   @id @default(cuid())
+	email        String   @unique
+	displayName  String?
+	createdAt    DateTime @default(now())
+	updatedAt    DateTime @updatedAt
+	accounts     OAuthAccount[]
+	agentLinks   AgentMcpLink[]
+}
+
+model OAuthAccount {
+	id                String   @id @default(cuid())
+	userId            String
+	provider          String
+	providerAccountId String
+	accessToken       String?
+	refreshToken      String?
+	expiresAt         DateTime?
+	createdAt         DateTime @default(now())
+	updatedAt         DateTime @updatedAt
+	user              User     @relation(fields: [userId], references: [id])
+	@@unique([provider, providerAccountId])
+}
+
+model McpServer {
+	id          String   @id @default(cuid())
+	name        String
+	url         String   @unique // MCP エンドポイント（Workers）
+	description String?
+	ownerUserId String?
+	status      McpStatus @default(ACTIVE)
+	authType    McpAuthType @default(NONE)
+	createdAt   DateTime @default(now())
+	updatedAt   DateTime @updatedAt
+	tags        McpServerTag[]
+}
+
+model McpServerTag {
+	id          String   @id @default(cuid())
+	mcpServerId String
+	tag         String
+	server      McpServer @relation(fields: [mcpServerId], references: [id])
+	@@index([tag])
+}
+
+model AgentMcpLink {
+	id          String   @id @default(cuid())
+	userId      String
+	mcpServerId String
+	enabled     Boolean  @default(true)
+	configJson  Json?
+	createdAt   DateTime @default(now())
+	updatedAt   DateTime @updatedAt
+	user        User      @relation(fields: [userId], references: [id])
+	server      McpServer @relation(fields: [mcpServerId], references: [id])
+	@@unique([userId, mcpServerId])
+}
+
+enum McpStatus { ACTIVE INACTIVE DEGRADED }
+enum McpAuthType { NONE API_KEY OAUTH }
+```
+
+備考：本番運用で必要になれば、評価/人気度、ヘルス履歴、監査ログ、組織テナントなどを追加。
+
+---
+
+## API 設計（Hono on Workers, 概要）
+
+共通：CORS は dev で `*`、本番はオリジン制限。`/auth/*` は OAuth、`/mcp/*` は MCP 関連。
+
+packages/mcp-server/worker/index.ts（例）
+- `GET /auth/authorize`（OAuth 2.1 認可）
+- `POST /auth/token`（トークン発行）
+- `GET /.well-known/openid-configuration`（Issuer メタ）
+- `GET /mcp/registry/list`（管理MCP公開: HTTP JSON でも提供）
+- `POST /mcp/registry/register`
+- `GET /mcp/registry/health/:id`
+- `GET /mcp/discovery/search`
+- MCP プロトコルエンドポイント（例 `/mcp/*` に集約、ラッパーがハンドリング）
+
+packages/agent/worker/index.ts（例）
+- `GET /api/user/me`
+- `GET /api/mcp/linked`（自分の Agent に紐づく MCP リスト）
+- `POST /api/mcp/link`（検索結果から追加）
+- `POST /api/mcp/unlink`
+- `POST /api/mcp/test`（接続テスト）
+
+---
+
+## OAuth 2.1 連携（高レベルフロー）
+
+前提：`packages/mcp-server` が Issuer。Agent はクライアントとして登録。
+
+1. Agent のユーザーが「MCP を追加」→ 検索MCPを呼び候補を取得
+2. 追加時に、必要なら mcp-server 側の OAuth 認可画面へ（PKCE を推奨）
+3. トークン取得後、Agent は `AgentMcpLink` を作成し、接続情報/スコープを保存
+4. Agent から対象 MCP に対し、MCP プロトコルでツール呼び出しが可能に
+
+Secrets（dev は `.dev.vars`）：
+- `MCP_ISSUER`, `JWT_SECRET`
+- `MCP_GOOGLE_CLIENT_ID`, `MCP_GOOGLE_CLIENT_SECRET`, `MCP_GOOGLE_REDIRECT_URI`（任意）
+- `DATABASE_URL`, `ALLOWED_ORIGINS`
+
+---
+
+## Workers 向け MCP ラッパーの方針
+
+- エクスポート（案）：
+	- `createMcpWorker(config)`：Hono ルーターを返す
+	- `defineTool({ name, description, schema, handler })`
+	- `defineResource({ name, loader })`
+	- `withAuth(handler, { requiredScopes })`
+- 非目標（MVP）：複雑なトランスポート抽象化や他プラットフォーム拡張
+- 目標：Workers の KV/DO/R2 を使ったセッションやキャッシュを容易に活用できる DX
+
+---
+
+## 開発マイルストーン（MVP → 拡張）
+
+M0: 基盤整備
+- [ ] `@agent/database` の Prisma 初期スキーマ追加 → `npm run db:generate`
+- [ ] `packages/mcp-server` に Issuer 骨組み（Arctic+jose+Hono）
+- [ ] CORS/ルーティング/Secrets の開発環境セット
+
+M1: MCP ラッパー v0
+- [ ] `src/framework` に最小の `createMcpWorker` 実装
+- [ ] ツール1個のサンプル（echo など）と e2e 呼び出し
+
+M2: 管理MCP（Registry）
+- [ ] `McpServer` 登録/更新 API（HTTP）
+- [ ] MCP ツール `list_servers`/`register_server`
+- [ ] ヘルスチェック cron or on-demand
+
+M3: 検索MCP（Discovery）
+- [ ] インデックス（タグ/テキスト）
+- [ ] MCP ツール `search_servers`/`suggest_servers`
+
+M4: Agent 連携
+- [ ] OAuth ログイン（mcp-server Issuer）
+- [ ] 検索 UI → 選択 → `AgentMcpLink` 作成
+- [ ] 接続テスト/インジケータ
+
+M5: ハードニング/運用
+- [ ] 認可スコープ/レート制限
+- [ ] 監査ログ/メトリクス
+- [ ] 本番 CORS/Secrets/アラート
+
+---
+
+## テスト計画（抜粋）
+
+- ユニット：ラッパーのツール登録/呼び出し、スキーマバリデーション
+- コンポーネント：Hono ルートの認証ガード、DB リポジトリ
+- e2e（dev）：
+	- 起動（8787, 8788）→ 管理MCPに登録 → 検索 → Agent で追加
+	- 失敗系：不正 URL、失敗するヘルス、トークン期限切れ
+
+---
+
+## リスク/未決事項
+
+- MCP プロトコルの詳細互換範囲（HTTP 経由の具象化方式）
+- 検索のランキング/スパム対策
+- 複数 Issuer（将来のフェデレーション対応）
+- マルチテナント（組織/ワークスペース）設計のスコープ
+
+---
+
+## 次の一手（開発者 ToDo）
+
+1. Prisma 下書きの確定とマイグレーション作成（`packages/database/prisma/schema.prisma`）
+2. mcp-server 側に Issuer の雛形と `/mcp` ルーターの足場を作成
+3. ラッパー v0（echo ツール）を作り、Workers で動くことを手元検証
+4. Agent UI に「MCP を探す」モーダルのワイヤーを配置（ダミー API で開始）
+
+---
+
+参考：既存の構成/規約
+- `packages/agent/worker/index.ts`：Hono アプリのエントリ
+- `packages/mcp-server/worker/index.ts`：MCP + OAuth のエントリ
+- `packages/database`：`@agent/database` として PrismaClient を共有
+- 開発コマンド（ルート）
+	- `npm run dev:agent`（Vite ビルド→Wrangler dev）
+	- `npm run dev:mcp`（MCP サーバー dev：port 8788）
+	- `npm run db:generate`（Prisma Client 生成）
 
