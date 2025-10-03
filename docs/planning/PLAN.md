@@ -1,200 +1,181 @@
-# プロジェクト計画書
+# プロジェクト計画 (PLAN)
 
-## 🎯 プロジェクト概要
+本ドキュメントは、本モノレポにおける「MCP サーバー群」と「Agent アプリ」の中長期計画をまとめたものです。要求は以下のとおり:
 
-**作りたいもの**: AIでネットサービスを誰でも簡単に作れるプラットフォーム
+- mcp-server: JavaScript で Workers 風に MCP サーバーを簡単に構築できる「Workers ラッパ」を提供する。さらに「メタ MCP サーバー」を実装する。これは、デプロイ済みの MCP サーバーを管理する MCP サーバー、および MCP サーバーを検索する MCP サーバーを提供する。
+- agent: Agent は MCP サーバー検索を用いてサーバーを自動追加し、各 MCP と連携して様々な操作を行えるようにする。agent と mcp-server は完全に独立したサービスで、OAuth (2.1) によって連携する。
 
-### コンセプト
-- TOP画面はChatGPT風のシンプルなチャットUI
-- AIだけですべてを完結して様々なサービスを利用できる
-- 自然言語でサービスを作成・管理・利用できる
+## 1. ゴールと非ゴール
 
-### 差別化ポイント
-- 🤖 **AI完結型**: コードを書かずにAIとの対話だけでサービス構築
-- 🛠️ **専用ツール**: 予約、物販、フォームなど用途別の最適化されたツール
-- 🎨 **リッチな表現**: Markdown以外の表現方法も提供
-- 🔌 **REST API**: どこからでもアクセス可能な公開API
-- 💳 **決済統合**: Stripe決済を標準搭載
+### ゴール
+- Workers 風の DX で MCP サーバーを素早く構築・デプロイできる。
+- メタ MCP サーバーが「MCP サーバーの登録・可視化・検索・健全性確認・OAuth 連携情報の配布」を提供。
+- Agent はメタ MCP サーバーの検索結果から OAuth フローを踏んで安全に接続し、ツール一覧を同期・自動追加できる。
+- 仕様に沿った OAuth 2.1 + PKCE をベースとしたセキュアな連携。
 
-## 🛠️ 技術スタック
+### 非ゴール
+- 独自の認証方式の発明 (標準 OAuth を最優先)。
+- ベンダー固有クラウドに強くロックインする設計 (Cloudflare Workers 優先だが抽象化を保持)。
 
-### フロントエンド
-- **Framework**: Vite + SolidJS
-- **UI**: ChatGPT風のチャットインターフェース
-- **認証**: Google/LINE OAuth
-
-### バックエンド
-- **Platform**: Cloudflare Workers
-- **Framework**: Hono
-- **AI**: LangGraph (Manus風の万能エージェント)
-- **Database**: PostgreSQL + Prisma
-- **Payment**: Stripe
-
-## 🏗️ アーキテクチャ方針
-
-### システム構成
+## 2. 全体アーキテクチャ
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  AIサービス (ai-service.example.com)                      │
-│  - フロントエンド: Vite + SolidJS                          │
-│  - バックエンド: Cloudflare Workers + Hono                │
-│  - 認証: Google/LINE OAuth                                │
-│  - AI: LangGraph Agent                                    │
-└─────────────────┬────────────────────────────────────────┘
-                  │ JWT Token
-                  ▼
-┌──────────────────────────────────────────────────────────┐
-│  MCPサーバー (mcp-api.example.com)                        │
-│  - バックエンド: Cloudflare Workers + Hono                │
-│  - 認証: 独自Google OAuth + AIサービストークン検証         │
-│  - ツール: 予約/物販/フォーム等                            │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────┐       OAuth 2.1       ┌─────────────────────┐
+│        Agent         │◀────────────────────▶│      MCP Server      │
+│ (SolidJS + Worker)   │                      │  (Workers + Hono)    │
+└──────────┬──────────┘                      └──────────┬──────────┘
+					 │  検索/登録 API                                   │
+					 ▼                                                  ▼
+	 ┌─────────────────────┐                          ┌─────────────────────┐
+	 │ Meta MCP Server     │───管理/検索/健全性───▶  │ Deployed MCP Servers │
+	 │ (Registry/Search)   │◀──登録/メタ情報取得───  │  (複数インスタンス)   │
+	 └─────────────────────┘                          └─────────────────────┘
 ```
 
-### 認証アーキテクチャ (OAuth 2.1 実装済み)
+- Meta MCP Server: MCP サーバーのレジストリ兼検索 API。OAuth メタデータや MCP ツール概要、稼働状況を集約。
+- Deployed MCP Servers: 業務ごとのツールを実装した MCP サーバーたち (Booking/Product/Order/Form など)。
+- Agent: Meta MCP Server を参照し、ユーザーの同意を得て OAuth 連携、ツールの自動追加・同期、実行 UI 提供。
 
-#### 1. エンドユーザー認証
-- **対象**: エンドユーザー
-- **方式**: OAuth 2.1 + PKCE
-- **プロバイダー**: Google OAuth 2.0
-- **管理**: JWT Access Token + Refresh Token
-- **機能**: 
-  - ユーザー認証・セッション管理
-  - トークンのリフレッシュ
-  - AI会話の管理
+## 3. コンポーネント詳細
 
-#### 2. MCPサーバー間通信
-- **配置**: 別のCloudflare Workersプロジェクト (`packages/mcp-server`)
-- **ドメイン**: 独立したドメイン/サブドメイン
-- **認証方式**:
-  - OAuth 2.1 Access Token検証
-  - JWTベースの認証
-- **機能**:
-  - ビジネスツールの提供
-  - データ管理
-  - REST API公開
+### 3.1 MCP Workers ラッパ (JavaScript)
+- 目的: Cloudflare Workers と同様の DX で MCP サーバーを作成可能にする。
+- 形態: `@mcp/worker` 的な薄いフレームワーク層。Hono に中間層を挟み、
+	- ルーティング: `app.mcpTool('name', schema, handler)` のような宣言 API
+	- 認証: Bearer/JWT + OAuth 2.1 メタデータ提供 (RFC 9728/8414)
+	- 型: ツール I/O スキーマの型生成 (zod/valibot 推奨)
+	- ロギング/メトリクス: 監視のための hooks 提供
+- 成果物: `createMcpWorker()` が `fetch(request, env, ctx)` を返し、Workers へデプロイ可能。
 
-### デプロイメント戦略
+### 3.2 Meta MCP Server (管理 + 検索)
+- サービス分割 (同一 Worker 内の論理モジュールでも可):
+	1) Registry: MCP サーバーの登録/更新、OAuth メタデータ、スコープ/ツール一覧のキャッシュ。
+	2) Discovery/Search: タグ/カテゴリ/スコープ/地域などで検索可能なインデックス。
+	3) Health/Status: 稼働確認 (ヘルスチェック、トークン不要でのステータス確認範囲の定義)。
+- 公開 API: 後述の API 仕様参照。
+- データ: `packages/database` を用いて永続化。
 
-#### AIサービス
-- **プロジェクト**: `packages/agent`
-- **デプロイ**: Cloudflare Workers
-- **ドメイン**: `ai-service.example.com`
-- **機能**: 
-  - フロントエンド配信
-  - ユーザー認証
-  - AI処理
-  - 決済処理
+### 3.3 Deployed MCP Servers
+- 共通: MCP Workers ラッパを利用し、OAuth 2.1 対応、`/.well-known` エンドポイント提供。
+- 業務: booking/product/order/form などのツール群を提供。
 
-#### MCPサーバー
-- **プロジェクト**: `packages/mcp-server` (新規作成予定)
-- **デプロイ**: Cloudflare Workers (別プロジェクト)
-- **ドメイン**: `mcp-api.example.com`
-- **機能**:
-  - ビジネスツールAPI
-  - 管理者向け機能
-  - データストレージ
+### 3.4 Agent アプリ
+- 機能:
+	- Meta MCP Server から検索→結果を一覧表示→選択すると OAuth 連携フローへ誘導。
+	- 連携後、ツール一覧の自動同期とカテゴリ別 UI 生成。
+	- 実行履歴、エラー表示、トークン更新、切断管理。
+- セキュリティ: OAuth 2.1 + PKCE、refresh token、scope 切り替え UI。
 
-### データベース設計
-- **共通**: PostgreSQL + Prisma
-- **AIサービステーブル**: ユーザー、セッション、会話履歴、トークン
-- **MCPサーバーテーブル**: サービス、予約、商品、注文、フォーム、MCP管理者
+## 4. セキュリティ & OAuth 連携
 
-## 🔐 セキュリティ設計
+- RFC 準拠: RFC 9728 (PRM), RFC 8414 (AS Metadata), RFC 8707 (Resource Indicators), RFC 7636 (PKCE), RFC 7591 (Dynamic Client Registration)。
+- 基本フロー:
+	1) Agent はメタ MCP 経由で対象 MCP の `resource_metadata` を取得。
+	2) Authorization Server Metadata を取得し、DCR (必要に応じて) を実行。
+	3) Authorization Code + PKCE によりユーザー同意を取得。
+	4) Access Token (JWT) + Refresh Token を受領し、安全に保管。
+	5) Bearer で MCP Tools API を呼び出し、WWW-Authenticate を適切処理。
+- 権限設計: スコープ設計はツール群に合わせて粒度を揃える (例: `booking:read|write`)。
 
-### トークンベース認証
-- **形式**: JWT (JSON Web Token)
-- **署名**: RSA鍵ペア
-- **有効期限**: 1時間(短期)
-- **スコープ**: 最小権限の原則
+## 5. API 仕様 (ドラフト)
 
-### 認証フロー (実装済み)
+### 5.1 Meta MCP Server
 
-#### OAuth 2.1 + PKCE フロー
-1. ユーザーがログインボタンをクリック
-2. PKCE Challenge生成
-3. Google認証ページへリダイレクト
-4. ユーザーが認証を許可
-5. コールバックでAuthorization Code取得
-6. Code VerifierでAccess Token取得
-7. JWTトークンでAPI通信
+- `GET /.well-known/oauth-authorization-server` / `GET /.well-known/oauth-protected-resource`
+	- OAuth メタデータ配布 (Agent からの自動検出を許可)
 
-## 📦 提供ツール
+- `POST /registry/servers`
+	- 概要: MCP サーバーの登録 (URL, タグ, カテゴリ, 所有者、公開範囲)
+	- 認証: 管理者/オーナー用トークン
+	- 成功: `201 Created` + 登録レコード
 
-### 1. 予約システム (Booking Tool)
-- 予約枠管理
-- 予約作成・キャンセル
-- 空き状況検索
-- カレンダー表示
+- `GET /registry/servers/:id`
+	- 概要: 登録済み MCP の詳細 (OAuth メタデータ、スコープ、ツールサマリ/キャッシュ)
 
-### 2. 物販システム (Product Tool)
-- 商品管理
-- 在庫管理
-- 注文処理
-- Stripe決済連携
+- `GET /search`
+	- クエリ: `q, tag, scope, category, owner, region, limit, cursor`
+	- 戻り: 検索結果のリスト + ページング
 
-### 3. フォームシステム (Form Tool)
-- フォーム作成
-- 回答収集
-- データ分析
-- エクスポート機能
+- `GET /health/:id`
+	- 概要: 登録 MCP のヘルス/可用性チェック結果
 
-### 4. 将来の拡張
-- イベント管理
-- メンバーシップ
-- サブスクリプション
-- コンテンツ管理
+- `POST /introspect`
+	- 概要: 登録 MCP への token 検証 (委任オプション) またはメタ情報整合性確認
 
-## 🚀 開発ロードマップ
+### 5.2 MCP Worker (各サーバー)
 
-### Phase 1: 基盤構築 ✅ 完了
-- [x] フロントエンド基本UI (Vite + SolidJS)
-- [x] AIサービス認証 (OAuth 2.1実装)
-- [x] 基本的なAPI構造
-- [x] データベーススキーマ設計
-- [x] Stripe決済統合
+- `GET /.well-known/oauth-authorization-server`
+- `GET /.well-known/oauth-protected-resource`
+- `POST /oauth/register` `GET /oauth/authorize` `POST /oauth/token`
+- `GET /mcp` `GET /mcp/tools`
+- `GET/POST /mcp/tools/:tool/...` (ツールごとのルート)
 
-### Phase 2: OAuth 2.1 統合 ✅ 完了
-- [x] OAuth 2.1認証フロー実装
-- [x] PKCE対応
-- [x] トークン管理システム
-- [x] MCPサーバー認証統合
-- [x] レガシー認証の削除
+## 6. データモデル (概略)
 
-### Phase 3: AI エージェント実装 🚧 進行中
-- [x] OpenAI統合
-- [x] チャットモード
-- [x] エージェントモード
-- [x] ツール実行基盤
-- [ ] 会話履歴の永続化
-- [ ] コンテキスト管理の強化
+Prisma 例 (概略、実スキーマは `packages/database/prisma/schema.prisma` で管理):
 
-### Phase 4: ビジネスツール実装 📋 計画中
-- [ ] 予約システム完成
-- [ ] 物販システム完成
-- [ ] フォームシステム完成
-- [ ] データベース統合
+- `McpServer`
+	- id, baseUrl, name, description, tags[], categories[], ownerId
+	- oauthIssuer, authorizationEndpoint, tokenEndpoint, jwksUri
+	- scopes[], toolsSummary (json), visibility, createdAt, updatedAt
 
-### Phase 5: 公開準備 🔮 未着手
-- [ ] パフォーマンス最適化
-- [ ] セキュリティ監査
-- [ ] ドキュメント整備
-- [ ] 本番デプロイ
+- `McpOwner (User/Org)`
+	- id, type, name, contact
 
-## 📚 関連ドキュメント
+- `AgentConnection`
+	- id, agentUserId, mcpServerId, scopesGranted[], createdAt
+	- tokenSet (encrypted), status (active/revoked), lastSyncAt
 
-### アーキテクチャ
-- [アーキテクチャ概要](../architecture/ARCHITECTURE.md)
-- [OAuth 2.1 分離アーキテクチャ](../architecture/SEPARATION_ARCHITECTURE_OAUTH2.md)
+- `HealthCheck`
+	- id, mcpServerId, status, latencyMs, checkedAt, detail
 
-### 実装ガイド
-- [OAuth 2.1 認証統合](../guides/MCP_AUTH_OAUTH2.md)
-- [AI統合ガイド](../guides/AI_INTEGRATION.md)
-- [決済統合](../guides/PAYMENT_INTEGRATION.md)
-- [クイックスタート](../guides/QUICKSTART.md)
+## 7. 開発計画 (マイルストーン)
 
-### 実装レポート
-- [認証実装報告](../reports/AUTH_IMPLEMENTATION.md)
-- [アーキテクチャ修正](../reports/ARCHITECTURE_CORRECTION.md)
-- [実装サマリー](../reports/SUMMARY.md)
+### M1: 基盤整備 (Workers ラッパ最小版 + Meta MCP 骨格)
+- MCP Workers ラッパ: `createMcpWorker()`, `app.mcpTool()` の最小実装
+- `/.well-known` と OAuth 2.1 のメタデータ配信 (固定値/設定ベース)
+- Meta MCP: `POST /registry/servers`, `GET /search` の最小実装
+- Database: `McpServer` スキーマの初版、Prisma generate
+
+### M2: OAuth 連携/実運用準備
+- Authorization Code + PKCE + DCR を安定化
+- スコープ設計と `WWW-Authenticate` 正常化
+- HealthCheck バッチ/エンドポイント実装
+- Meta MCP の詳細画面 API (`GET /registry/servers/:id`)
+
+### M3: Agent 連携と自動追加
+- Agent UI: 検索→選択→OAuth 同意→接続の一連を実装
+- 接続後のツール自動同期と UI 自動生成 (カテゴリ/タグ別)
+- 失効/再認可、トークン更新 UI
+
+### M4: 拡張と運用
+- 監査ログ、メトリクス、通知 (失効/障害)
+- エクスポート/インポート (サーバー登録の JSON)
+- 組織/テナント対応、RBAC
+
+## 8. 実装指針と技術選定
+
+- ランタイム: Cloudflare Workers (Hono)。将来的に Miniflare/Node 互換を視野に抽象化
+- 型/バリデーション: TypeScript + zod/valibot
+- セキュアストレージ: TokenSet は暗号化保管 (Web Crypto / Workers Secrets)
+- Observability: 標準ログ + 低コストヘルスプローブ
+- テスト: e2e は Vitest + Miniflare。または `wrangler dev` を使った統合試験
+
+## 9. リスクと対策
+
+- OAuth 実装の複雑性: 既存コード (packages/mcp-server) を共通ライブラリ化し重複を削減
+- 検索/登録のスパム対策: レート制限、所有者確認、非公開/審査制の導入
+- ベンダーロックイン: fetch ハンドラとストレージを薄く抽象化
+
+## 10. 進め方 (次アクション)
+
+1) Workers ラッパの API デザインを小さく決め、`packages/mcp-server` で PoC 実装
+2) Meta MCP Server の最小 API (`POST /registry/servers`, `GET /search`) を作成
+3) Prisma に `McpServer` モデル追加し `db:generate` 実行
+4) Agent 側に「検索→追加→OAuth 同意」のモック UI を追加
+5) M2 以降で DCR/PKCE/ヘルスチェックなどを段階的に拡充
+
+---
+
+この計画はドラフトです。実装が進むにつれて API とデータモデルはバージョン管理しながら更新します。
+
