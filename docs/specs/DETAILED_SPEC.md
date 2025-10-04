@@ -294,7 +294,6 @@ export default createMcpWorker({
   - `npm run dev:mcp`
   - `npm run db:generate`
 - **環境変数（開発時）**:
-  - `DATABASE_URL`
   - `JWT_SECRET`
   - `MCP_ISSUER`
   - `ALLOWED_ORIGINS`

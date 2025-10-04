@@ -5,8 +5,6 @@
 # OpenAI API Key (required for AI features)
 OPENAI_API_KEY=your-openai-api-key-here
 
-# Database URL (PostgreSQL)
-DATABASE_URL=your-database-url-here
 
 # Stripe Secret Key (for payments)
 STRIPE_SECRET_KEY=your-stripe-secret-key-here

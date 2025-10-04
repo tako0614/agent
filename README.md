@@ -2,12 +2,22 @@
 
 ## 🧭 Overview
 
-Vite + SolidJS フロントエンド、Cloudflare Workers ベースのバックエンド、Prisma を用いたデータ層で構成された AI エージェント プロダクトのモノレポです。
+Vite + SolidJS フロントエンド、Cloudflare Workers ベースのバックエンド、Prisma + D1 (SQLite) を用いたデータ層で構成された AI エージェント プロダクトのモノレポです。
 
 - **フロントエンド / エッジ API**: `packages/agent` — SolidJS + Cloudflare Workers (Hono) による UI & BFF
-- **データアクセス層**: `packages/database` — Prisma を用いた共通データベースクライアント
+- **データアクセス層**: `packages/database` — Prisma + Cloudflare D1 を用いた共通データベースクライアント
 - **MCP サーバー**: `packages/mcp-server` — OAuth 2.1 対応の Model Context Protocol サーバー
 - **ドキュメント**: 要件・設計メモは `docs/` 以下に整理
+
+### 🗄️ データベース: Cloudflare D1
+
+このプロジェクトは **Cloudflare D1**（SQLite ベース）を使用しています。
+
+- ✅ Cloudflare Workers とのネイティブ統合
+- ✅ グローバルエッジでの低レイテンシー
+- ✅ 無料プランあり（5GB、500万読み取り/日）
+
+詳細は [`D1_MIGRATION.md`](./D1_MIGRATION.md) を参照してください。
 
 ## 🗂️ Directory Structure
 
@@ -64,6 +74,7 @@ Vite + SolidJS フロントエンド、Cloudflare Workers ベースのバック�
 
 ## 📑 Documentation
 
+- [`D1_MIGRATION.md`](./D1_MIGRATION.md) — **Cloudflare D1 データベースのセットアップとマイグレーション**
 - `docs/planning/PLAN.md` — プロダクトの計画、要件、実装指針
 - `packages/*/README*.md` — 各パッケージに固有のセットアップ手順や API 仕様
 - OAuth セットアップ: [`packages/mcp-server/SETUP_OAUTH.md`](./packages/mcp-server/SETUP_OAUTH.md)
@@ -72,17 +83,30 @@ Vite + SolidJS フロントエンド、Cloudflare Workers ベースのバック�
 ## 🚀 Getting Started
 
 ```powershell
-# 依存関係のインストール
+# 1. 依存関係のインストール
 npm install
 
-# Agent アプリを開発モードで起動
+# 2. D1 データベースの初期化（初回のみ）
+cd packages\agent
+npx wrangler d1 execute agent-db --local --file=../database/migrations/0001_init.sql
+npx wrangler d1 execute agent-db --local --file=../database/migrations/0002_add_oauth_state.sql
+cd ..\..
+
+# 3. Prisma Client の生成
+npm run db:generate
+
+# 4. 環境変数の設定
+# packages/agent/.dev.vars を編集（Google OAuth設定など）
+# packages/mcp-server/.dev.vars を編集（必要に応じて）
+
+# 5. Agent アプリを開発モードで起動
 npm run dev:agent
 
-# 別ターミナルで MCP サーバーを起動
+# 6. 別ターミナルで MCP サーバーを起動（オプション）
 npm run dev:mcp
 ```
 
-必要に応じて `packages/database` で Prisma のマイグレーションやシードを実行し、Cloudflare Workers 用に `wrangler.toml` と環境変数を設定してください。
+詳細なセットアップ手順は [`D1_MIGRATION.md`](./D1_MIGRATION.md) を参照してください。
 
 ## 🧭 Next Steps
 

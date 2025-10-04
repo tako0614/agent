@@ -9,8 +9,5 @@ MCP_GOOGLE_CLIENT_ID=your-google-client-id
 MCP_GOOGLE_CLIENT_SECRET=your-google-client-secret
 MCP_GOOGLE_REDIRECT_URI=http://localhost:8788/auth/callback/google
 
-# Database Connection
-DATABASE_URL=postgresql://user:password@localhost:5432/agent
-
 # CORS Origin
 ALLOWED_ORIGINS=http://localhost:8787,https://ai-service.example.com

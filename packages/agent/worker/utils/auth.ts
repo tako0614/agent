@@ -61,10 +61,6 @@ export const authenticate = async (
   try {
     const secret = encoder.encode(c.env.JWT_SECRET);
     const issuer = c.env.MCP_ISSUER || c.env.MCP_SERVER_URL || 'agent-worker';
-    
-    console.log('Verifying JWT with issuer:', issuer);
-    console.log('Token (first 30 chars):', token.substring(0, 30));
-    
     const { payload } = await jwtVerify(token, secret, {
       issuer: issuer,
     });

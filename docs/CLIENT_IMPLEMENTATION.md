@@ -164,7 +164,6 @@ npm run dev:agent
 
 ### API エラー
 - Worker のログを確認: `wrangler tail`
-- Database 接続を確認: `DATABASE_URL` が正しいか
 - CORS エラー: Hono ミドルウェアの設定を確認
 
 ### ビルドエラー
