@@ -23,10 +23,12 @@ const extractScopes = (raw?: unknown): string[] => {
   }
 
   if (typeof raw === 'string') {
-    return raw
-      .split(/\\s+/)
+    const scopes = raw
+      .split(/\s+/)
       .map((scope) => scope.trim())
       .filter(Boolean);
+    console.log('Extracted scopes from string:', scopes);
+    return scopes;
   }
 
   return [];
@@ -58,9 +60,16 @@ export const authenticate = async (
 
   try {
     const secret = encoder.encode(c.env.JWT_SECRET);
+    const issuer = c.env.MCP_ISSUER || c.env.MCP_SERVER_URL || 'agent-worker';
+    
+    console.log('Verifying JWT with issuer:', issuer);
+    console.log('Token (first 30 chars):', token.substring(0, 30));
+    
     const { payload } = await jwtVerify(token, secret, {
-      issuer: c.env.MCP_SERVER_URL || c.env.MCP_ISSUER,
+      issuer: issuer,
     });
+
+    console.log('JWT verified successfully. Payload:', payload);
 
     const scopes = extractScopes(payload.scope ?? payload.scopes);
     const userId = typeof payload.sub === 'string' ? payload.sub : null;
@@ -69,12 +78,14 @@ export const authenticate = async (
     const missingScope = requiredScopes.find((scope) => !scopes.includes(scope));
 
     if (missingScope) {
+      console.log('Missing scope:', missingScope, 'User scopes:', scopes);
       throw new HTTPException(403, {
         res: c.json({ error: 'insufficient_scope', missing: missingScope }, 403),
       });
     }
 
     if (!userId) {
+      console.log('No userId found in token');
       throw new HTTPException(403, {
         res: c.json({ error: 'invalid_subject' }, 403),
       });
@@ -90,12 +101,14 @@ export const authenticate = async (
 
     return auth;
   } catch (error) {
+    console.error('JWT verification failed:', error);
+    
     if (error instanceof HTTPException) {
       throw error;
     }
 
     throw new HTTPException(401, {
-      res: c.json({ error: 'invalid_token' }, 401),
+      res: c.json({ error: 'invalid_token', details: error instanceof Error ? error.message : 'Unknown error' }, 401),
     });
   }
 };

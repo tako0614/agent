@@ -31,10 +31,23 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const headers = {
+    
+    // localStorageからトークンを取得
+    const token = localStorage.getItem('auth_token');
+    
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
     };
+
+    // 既存のヘッダーをマージ
+    if (options.headers) {
+      const existingHeaders = options.headers as Record<string, string>;
+      Object.assign(headers, existingHeaders);
+    }
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
 
     const response = await fetch(url, {
       ...options,

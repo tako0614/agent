@@ -7,6 +7,9 @@ export type Bindings = {
   MCP_SERVICE_TOKEN?: string;
   MCP_ISSUER?: string;
   ALLOWED_ORIGINS?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REDIRECT_URI?: string;
 };
 
 export type AuthContext = {

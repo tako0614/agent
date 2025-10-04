@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
+import { Google, generateState, generateCodeVerifier } from 'arctic';
+import { SignJWT } from 'jose';
 import type { AppVariables, Bindings } from './types';
 import { getPrisma } from './utils/prisma';
 import { requireAuth } from './utils/auth';
@@ -109,6 +111,200 @@ app.use('*', async (c, next) => {
 });
 
 app.get('/healthz', (c) => c.json({ ok: true }));
+
+// Google OAuth ログインエンドポイント
+app.get('/auth/google', async (c) => {
+  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI } = c.env;
+
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
+    return c.json({ error: 'google_oauth_not_configured' }, 500);
+  }
+
+  const google = new Google(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+  const state = generateState();
+  const codeVerifier = generateCodeVerifier();
+
+  const url = google.createAuthorizationURL(state, codeVerifier, ['openid', 'email', 'profile']);
+
+  // ステートとコードベリファイアをCookieに保存
+  const response = c.redirect(url.toString());
+  response.headers.append('Set-Cookie', `google_oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`);
+  response.headers.append('Set-Cookie', `google_code_verifier=${codeVerifier}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`);
+
+  return response;
+});
+
+// Google OAuth コールバックエンドポイント
+app.get('/auth/callback/google', async (c) => {
+  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, JWT_SECRET, MCP_ISSUER } = c.env;
+
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
+    return c.json({ error: 'google_oauth_not_configured' }, 500);
+  }
+
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+
+  if (!code || !state) {
+    return c.json({ error: 'missing_code_or_state' }, 400);
+  }
+
+  // Cookieから状態とコードベリファイアを取得
+  const cookies = c.req.header('cookie') || '';
+  console.log('Received cookies:', cookies);
+  console.log('Received state from URL:', state);
+  
+  const cookieMap = new Map(
+    cookies.split(';').map(cookie => {
+      const [key, value] = cookie.trim().split('=');
+      return [key, value];
+    })
+  );
+
+  const savedState = cookieMap.get('google_oauth_state');
+  const codeVerifier = cookieMap.get('google_code_verifier');
+
+  console.log('Saved state from cookie:', savedState);
+  console.log('Code verifier from cookie:', codeVerifier);
+
+  if (!savedState || !codeVerifier) {
+    return c.json({ 
+      error: 'missing_cookies',
+      details: { savedState: !!savedState, codeVerifier: !!codeVerifier },
+      cookies: cookies 
+    }, 400);
+  }
+
+  if (savedState !== state) {
+    return c.json({ 
+      error: 'invalid_state',
+      details: { expected: savedState, received: state }
+    }, 400);
+  }
+
+  try {
+    const google = new Google(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+    const tokens = await google.validateAuthorizationCode(code, codeVerifier);
+
+    const accessToken = tokens.accessToken();
+    let refreshToken: string | null = null;
+    let expiresAt: Date | null = null;
+
+    // refresh_tokenは初回認証時のみ提供される
+    try {
+      refreshToken = tokens.refreshToken();
+    } catch (e) {
+      console.log('No refresh token available (this is normal for subsequent logins)');
+    }
+
+    try {
+      expiresAt = tokens.accessTokenExpiresAt();
+    } catch (e) {
+      console.log('No expiry time available');
+    }
+
+    // GoogleのユーザーInfo APIを呼び出す
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!userInfoResponse.ok) {
+      throw new Error('Failed to fetch user info');
+    }
+
+    const userInfo = await userInfoResponse.json() as {
+      sub: string;
+      email: string;
+      name?: string;
+      picture?: string;
+    };
+
+    // ユーザーをデータベースに保存または更新
+    const prisma = c.var.prisma;
+    
+    let user = await prisma.user.findFirst({
+      where: {
+        accounts: {
+          some: {
+            provider: 'google',
+            providerAccountId: userInfo.sub,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      // 新規ユーザーを作成
+      user = await prisma.user.create({
+        data: {
+          email: userInfo.email,
+          displayName: userInfo.name || userInfo.email.split('@')[0],
+          accounts: {
+            create: {
+              provider: 'google',
+              providerAccountId: userInfo.sub,
+              accessToken,
+              refreshToken,
+              expiresAt,
+            },
+          },
+        },
+      });
+    } else {
+      // 既存ユーザーのトークンを更新
+      await prisma.oAuthAccount.updateMany({
+        where: {
+          userId: user.id,
+          provider: 'google',
+        },
+        data: {
+          accessToken,
+          refreshToken,
+          expiresAt,
+        },
+      });
+    }
+
+    // JWTを生成
+    const encoder = new TextEncoder();
+    const secret = encoder.encode(JWT_SECRET);
+    const issuer = MCP_ISSUER || 'agent-worker';
+    
+    console.log('Generating JWT with issuer:', issuer);
+    
+    const jwt = await new SignJWT({
+      sub: user.id,
+      email: user.email,
+      scope: 'agent.session.manage mcp.discovery.read',
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuer(issuer)
+      .setIssuedAt()
+      .setExpirationTime('7d')
+      .sign(secret);
+
+    console.log('JWT generated successfully for user:', user.id, user.email);
+    console.log('JWT token (first 20 chars):', jwt.substring(0, 20));
+
+    // フロントエンドにリダイレクトしてトークンを渡す
+    const redirectUrl = new URL('/', c.req.url);
+    redirectUrl.searchParams.set('token', jwt);
+
+    console.log('Redirecting to:', redirectUrl.toString().substring(0, 100));
+
+    // Cookieをクリア
+    const redirectResponse = c.redirect(redirectUrl.toString());
+    redirectResponse.headers.append('Set-Cookie', `google_oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    redirectResponse.headers.append('Set-Cookie', `google_code_verifier=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+
+    return redirectResponse;
+  } catch (error) {
+    console.error('Google OAuth error:', error);
+    return c.json({ error: 'oauth_failed', message: error instanceof Error ? error.message : 'Unknown error' }, 500);
+  }
+});
 
 app.get('/api/user/me', requireAuth([SCOPE_AGENT]), async (c) => {
   const auth = c.var.auth;

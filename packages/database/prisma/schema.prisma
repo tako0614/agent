@@ -102,3 +102,15 @@ model ConversationMessage {
 
 	@@index([sessionId])
 }
+
+model OAuthState {
+	id           String   @id @default(cuid())
+	state        String   @unique
+	codeVerifier String
+	provider     String
+	expiresAt    DateTime
+	createdAt    DateTime @default(now())
+
+	@@index([state])
+	@@index([expiresAt])
+}

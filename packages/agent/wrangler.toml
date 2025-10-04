@@ -13,6 +13,7 @@ run_worker_first = ["/api/*", "/mcp/*", "/auth/*"]
 binding = "DB"
 database_name = "agent-db"
 database_id = "5d37dc65-7771-4e1a-bd9f-18d271fef90b"
+migrations_dir = "../database/migrations"
 
 # Environment variables (for development)
 # For production, use: wrangler secret put OPENAI_API_KEY
