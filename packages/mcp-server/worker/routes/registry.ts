@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { McpAuthType, McpStatus, Prisma } from '@agent/database';
 import type { AppVariables, Bindings } from '../types';
 import { requireScopes } from '../utils/auth';
+import { serializeMcpServer } from '../utils/serialization';
 
 const listQuerySchema = z.object({
   tag: z.string().min(1).max(64).optional(),
@@ -35,19 +36,6 @@ const updateSchema = registerSchema
 const disableSchema = z.object({
   id: z.string().min(1),
   reason: z.string().max(512).optional(),
-});
-
-const serializeServer = (server: Prisma.McpServerGetPayload<{ include: { tags: true } }>) => ({
-  id: server.id,
-  name: server.name,
-  url: server.url,
-  description: server.description,
-  ownerUserId: server.ownerUserId,
-  status: server.status,
-  authType: server.authType,
-  tags: server.tags.map((tag) => tag.tag),
-  createdAt: server.createdAt.toISOString(),
-  updatedAt: server.updatedAt.toISOString(),
 });
 
 const generateServerId = (name: string) => {
@@ -99,7 +87,7 @@ registryRouter.get('/list', requireScopes(['mcp.registry.read']), async (c) => {
   const items = hasNext ? servers.slice(0, -1) : servers;
 
   return c.json({
-    items: items.map(serializeServer),
+    items: items.map(serializeMcpServer),
     nextCursor: hasNext ? items[items.length - 1]?.id : undefined,
   });
 });
@@ -132,7 +120,7 @@ registryRouter.post('/register', requireScopes(['mcp.registry.write']), async (c
       include: { tags: true },
     });
 
-    return c.json({ id: server.id, server: serializeServer(server) }, 201);
+    return c.json({ id: server.id, server: serializeMcpServer(server) }, 201);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return c.json({ error: 'duplicate_entry', target: error.meta?.target }, 409);
@@ -179,7 +167,7 @@ registryRouter.post('/update', requireScopes(['mcp.registry.write']), async (c) 
       return tx.mcpServer.findUniqueOrThrow({ include: { tags: true }, where: { id } });
     });
 
-    return c.json({ server: serializeServer(updated) });
+    return c.json({ ok: true, server: serializeMcpServer(updated) });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
       return c.json({ error: 'not_found' }, 404);
@@ -206,7 +194,7 @@ registryRouter.post('/disable', requireScopes(['mcp.registry.write']), async (c)
       include: { tags: true },
     });
 
-    return c.json({ ok: true, server: serializeServer(server) });
+    return c.json({ ok: true, server: serializeMcpServer(server) });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
       return c.json({ error: 'not_found' }, 404);

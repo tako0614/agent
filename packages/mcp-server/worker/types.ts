@@ -5,6 +5,7 @@ export type Bindings = {
   JWT_SECRET: string;
   MCP_ISSUER: string;
   ALLOWED_ORIGINS?: string;
+  BUILTIN_MCP_SERVERS?: string;
 };
 
 export type AuthContext = {
