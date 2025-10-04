@@ -1,41 +1,8 @@
 ## AI Agent Monorepo 開発計画（PLAN）
 
-本ドキュメントは、Cloudflare Workers 上で動作する MCP（Model Context Protocol）サーバー群と、独立したフロントエンド/Agent サービスを OAuth で連携させるプロダmodel AgentMcpLink {
-  id          String   @id @default(cuid())
-  userId      String
-  mcpServerId String
-  enabled     Boolean  @default(true)
-  configJson  Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User      @relation(fields: [userId], references: [id])
-  server      McpServer @relation(fields: [mcpServerId], references: [id])
-  @@unique([userId, mcpServerId])
-}
+本ドキュメントは、Cloudflare Workers 上で動作する MCP（Model Context Protocol）サーバー群と、独立したフロントエンド/Agent サービスを OAuth で連携させるプロダクトの高レベル計画を示す。
 
-model AgentSession {
-  id          String   @id @default(cuid())
-  userId      String
-  graphState  Json     // LangGraph 状態スナップショット
-  checkpoint  Json?    // チェックポイントデータ
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id])
-}
-
-model ConversationMessage {
-  id          String   @id @default(cuid())
-  sessionId   String
-  role        String   // user/assistant/system/tool
-  content     String   @db.Text
-  metadata    Json?    // ツール呼び出し結果、引用など
-  createdAt   DateTime @default(now())
-  session     AgentSession @relation(fields: [sessionId], references: [id])
-  @@index([sessionId])
-}
-
-enum McpStatus { ACTIVE INACTIVE DEGRADED }
-enum McpAuthType { NONE API_KEY OAUTH }-
+> 詳細仕様（データモデル、API 仕様、LangGraph フローなど）は `docs/specs/DETAILED_SPEC.md` に分離した。実装時はそちらを参照すること。
 
 ## ビジョン / ゴール
 
@@ -89,7 +56,7 @@ enum McpAuthType { NONE API_KEY OAUTH }-
 	- 配布（クライアントに接続情報やメタデータ提供）
 - 主要ツール（想定）：
 	- `list_servers`（フィルタ: tag, status, owner）
-	- `register_server`（url, name, tags, auth）
+	- `register_server`（AI がユニークな serverId を割り振り、description にエンドポイント URL を含める。tags/auth を登録。Agent はこの serverId を使って `id.tool` 形式のツール識別子を生成する）
 	- `update_server` / `disable_server`
 	- `get_server_info` / `health_check`
 
@@ -113,6 +80,7 @@ enum McpAuthType { NONE API_KEY OAUTH }-
   - **エッジ/条件分岐**：ツール結果に応じた次アクション決定
   - **チェックポイント**：会話履歴やエージェント状態を永続化（KV/DB）
   - **MCP ツールを LangChain Tool としてラップ**し、LangGraph ノードから呼び出し
+	- LangGraph 内部でのツール識別子は `id.tool`（例：`registry-123.list_servers`）形式に統一し、`register_server` が発行するユニーク ID と MCP 提供ツール名を連結して名前衝突を防ぐ
   - **内蔵ツール**（Agent 自身の機能）：
     - `search_mcp_servers`：検索MCP を呼び出してツール候補を取得
     - `add_mcp_server`：検索結果から MCP を自分に追加（`AgentMcpLink` 作成）
@@ -124,107 +92,19 @@ enum McpAuthType { NONE API_KEY OAUTH }-
   - **（オプション）MCP 管理 GUI**：検索/追加/削除を手動操作できる UI（ツールと同じ API を使用）
   - 「接続テスト」＆ステータスアイコン---
 
-## データモデル（Prisma 下書き）
+## データモデル（概要）
 
-場所：`packages/database/prisma/schema.prisma`
-
-目的：ユーザー、OAuth、MCP サーバーのレジストリ、Agent と MCP のリンクを保持。
-
-候補スキーマ（抜粋・ドラフト）
-
-```prisma
-model User {
-	id           String   @id @default(cuid())
-	email        String   @unique
-	displayName  String?
-	createdAt    DateTime @default(now())
-	updatedAt    DateTime @updatedAt
-	accounts     OAuthAccount[]
-	agentLinks   AgentMcpLink[]
-}
-
-model OAuthAccount {
-	id                String   @id @default(cuid())
-	userId            String
-	provider          String
-	providerAccountId String
-	accessToken       String?
-	refreshToken      String?
-	expiresAt         DateTime?
-	createdAt         DateTime @default(now())
-	updatedAt         DateTime @updatedAt
-	user              User     @relation(fields: [userId], references: [id])
-	@@unique([provider, providerAccountId])
-}
-
-model McpServer {
-	id          String   @id @default(cuid())
-	name        String
-	url         String   @unique // MCP エンドポイント（Workers）
-	description String?
-	ownerUserId String?
-	status      McpStatus @default(ACTIVE)
-	authType    McpAuthType @default(NONE)
-	createdAt   DateTime @default(now())
-	updatedAt   DateTime @updatedAt
-	tags        McpServerTag[]
-}
-
-model McpServerTag {
-	id          String   @id @default(cuid())
-	mcpServerId String
-	tag         String
-	server      McpServer @relation(fields: [mcpServerId], references: [id])
-	@@index([tag])
-}
-
-model AgentMcpLink {
-	id          String   @id @default(cuid())
-	userId      String
-	mcpServerId String
-	enabled     Boolean  @default(true)
-	configJson  Json?
-	createdAt   DateTime @default(now())
-	updatedAt   DateTime @updatedAt
-	user        User      @relation(fields: [userId], references: [id])
-	server      McpServer @relation(fields: [mcpServerId], references: [id])
-	@@unique([userId, mcpServerId])
-}
-
-enum McpStatus { ACTIVE INACTIVE DEGRADED }
-enum McpAuthType { NONE API_KEY OAUTH }
-```
-
-備考：本番運用で必要になれば、評価/人気度、ヘルス履歴、監査ログ、組織テナントなどを追加。
+- Prisma により `User`、`OAuthAccount`、`McpServer`、`AgentMcpLink`、`AgentSession`、`ConversationMessage` 等を定義し、MCP レジストリとエージェントセッションを永続化する。
+- 列挙型 `McpStatus` と `McpAuthType` によりサーバーステータスと認証方式を管理する。
+- フィールド詳細やリレーション要件は `docs/specs/DETAILED_SPEC.md` を参照。
 
 ---
 
-## API 設計（Hono on Workers, 概要）
+## API 設計（概要）
 
-共通：CORS は dev で `*`、本番はオリジン制限。`/auth/*` は OAuth、`/mcp/*` は MCP 関連。
-
-packages/mcp-server/worker/index.ts（例）
-- `GET /auth/authorize`（OAuth 2.1 認可）
-- `POST /auth/token`（トークン発行）
-- `GET /.well-known/openid-configuration`（Issuer メタ）
-- `GET /mcp/registry/list`（管理MCP公開: HTTP JSON でも提供）
-- `POST /mcp/registry/register`
-- `GET /mcp/registry/health/:id`
-- `GET /mcp/discovery/search`
-- MCP プロトコルエンドポイント（例 `/mcp/*` に集約、ラッパーがハンドリング）
-
-packages/agent/worker/index.ts（例）
-- `GET /api/user/me`
-- `GET /api/mcp/linked`（自分の Agent に紐づく MCP リスト）※GUI/内蔵ツール共用
-- `POST /api/mcp/search`（mcp-server の検索MCP を呼び出し）※GUI/内蔵ツール共用
-- `POST /api/mcp/link`（検索結果から追加）※GUI/内蔵ツール共用
-- `POST /api/mcp/unlink`（削除/無効化）※GUI/内蔵ツール共用
-- `POST /api/mcp/test`（接続テスト）
-- **`POST /api/agent/chat`**（LangGraph エージェント実行：ストリーミング対応）
-- **`GET /api/agent/state/:sessionId`**（エージェント状態/履歴取得）
-- **`POST /api/agent/interrupt`**（実行中断/ユーザー確認待ち）
-
-備考：`/api/mcp/*` エンドポイントは、LangGraph の内蔵ツール（`search_mcp_servers`, `add_mcp_server` など）と GUI の両方から呼ばれる共通 API。
+- `packages/mcp-server` の Worker は OAuth 発行 (`/auth/*`)、MCP レジストリ (`/mcp/registry/*`)、検索 (`/mcp/discovery/*`)、および MCP プロトコル実行 API を担当する。
+- `packages/agent` の Worker はユーザー情報、MCP 管理、LangGraph 実行を提供する `/api/*` エンドポイントを持つ。
+- エンドポイントごとのパラメータ・レスポンス仕様は `docs/specs/DETAILED_SPEC.md` に記載。
 
 ---
 
@@ -258,8 +138,14 @@ Secrets（dev は `.dev.vars`）：
 
 ## 開発マイルストーン（MVP → 拡張）
 
+### 進捗サマリ（2025-10-04）
+
+- Prisma スキーマとクライアント生成を完了し、`User` ~ `ConversationMessage` までのデータモデルを確定。
+- MCP Registry HTTP API（list/register/update/disable/health）を Cloudflare Worker 上に実装、スコープ検証と Zod バリデーションを導入。
+- ワーカー共通基盤として CORS 設定、Request ID、Prisma 初期化、JWT ベースのスコープ検証を整備。
+
 M0: 基盤整備
-- [ ] `@agent/database` の Prisma 初期スキーマ追加 → `npm run db:generate`
+- [x] `@agent/database` の Prisma 初期スキーマ追加 → `npm run db:generate`
 - [ ] `packages/mcp-server` に Issuer 骨組み（Arctic+jose+Hono）
 - [ ] CORS/ルーティング/Secrets の開発環境セット
 
@@ -268,7 +154,7 @@ M1: MCP ラッパー v0
 - [ ] ツール1個のサンプル（echo など）と e2e 呼び出し
 
 M2: 管理MCP（Registry）
-- [ ] `McpServer` 登録/更新 API（HTTP）
+- [x] `McpServer` 登録/更新 API（HTTP）
 - [ ] MCP ツール `list_servers`/`register_server`
 - [ ] ヘルスチェック cron or on-demand
 
@@ -321,18 +207,18 @@ M5: ハードニング/運用
 ---
 
 ## 次の一手（開発者 ToDo）
-
-1. Prisma 下書きの確定とマイグレーション作成（`packages/database/prisma/schema.prisma`）
-   - `AgentSession`、`ConversationMessage` を追加してセッション永続化対応
-2. mcp-server 側に Issuer の雛形と `/mcp` ルーターの足場を作成
-3. ラッパー v0（echo ツール）を作り、Workers で動くことを手元検証
-4. **Agent 側 LangGraph 実装**（`packages/agent/worker/graph.ts` など）
-   - StateGraph 定義（基本的な会話フロー）
-   - **内蔵ツール実装**（`search_mcp_servers`, `add_mcp_server` など）
-   - MCP ツールのラッパー作成（動的読み込み）
-   - チェックポイント機能の統合
-5. チャット UI プロトタイプ（会話履歴、エージェント実行状態の可視化）
-6. **（オプション）MCP 管理 GUI**（検索/追加 UI：内蔵ツールと同じ API を使用）
+1. Prisma スキーマに対する初回マイグレーション作成と `npm run db:push` の実行
+  - 本番/開発双方での `DATABASE_URL` 管理方針を整理
+2. mcp-server 側に OAuth Issuer 雛形と `/auth` 実装を追加（PKCE 対応まで）
+3. Registry API に対する統合テスト（認証スコープ検証・エラーパス）を整備
+4. ラッパー v0（echo ツール）を作り、Workers で動くことを手元検証
+5. **Agent 側 LangGraph 実装**（`packages/agent/worker/graph.ts` など）
+  - StateGraph 定義（基本的な会話フロー）
+  - **内蔵ツール実装**（`search_mcp_servers`, `add_mcp_server` など）
+  - MCP ツールのラッパー作成（動的読み込み）
+  - チェックポイント機能の統合
+6. チャット UI プロトタイプ（会話履歴、エージェント実行状態の可視化）
+7. **（オプション）MCP 管理 GUI**（検索/追加 UI：内蔵ツールと同じ API を使用）
 
 ---
 

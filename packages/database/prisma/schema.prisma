@@ -1,0 +1,115 @@
+generator client {
+	provider = "prisma-client-js"
+}
+
+datasource db {
+	provider = "postgresql"
+	url      = env("DATABASE_URL")
+}
+
+enum McpStatus {
+	ACTIVE
+	INACTIVE
+	DEGRADED
+}
+
+enum McpAuthType {
+	NONE
+	API_KEY
+	OAUTH
+}
+
+model User {
+	id          String            @id @default(cuid())
+	email       String            @unique
+	displayName String?
+	createdAt   DateTime          @default(now())
+	updatedAt   DateTime          @updatedAt
+
+	accounts     OAuthAccount[]
+	agentLinks   AgentMcpLink[]
+	sessions     AgentSession[]
+	ownedServers McpServer[]      @relation("UserOwnedServers")
+}
+
+model OAuthAccount {
+	id                String   @id @default(cuid())
+	userId            String
+	provider          String
+	providerAccountId String
+	accessToken       String?
+	refreshToken      String?
+	expiresAt         DateTime?
+	createdAt         DateTime @default(now())
+	updatedAt         DateTime @updatedAt
+
+	user User @relation(fields: [userId], references: [id])
+
+	@@unique([provider, providerAccountId])
+}
+
+model McpServer {
+	id          String       @id
+	name        String
+	url         String       @unique
+	description String?
+	ownerUserId String?
+	status      McpStatus    @default(ACTIVE)
+	authType    McpAuthType  @default(NONE)
+	createdAt   DateTime     @default(now())
+	updatedAt   DateTime     @updatedAt
+
+	owner      User?             @relation("UserOwnedServers", fields: [ownerUserId], references: [id])
+	tags       McpServerTag[]
+	agentLinks AgentMcpLink[]
+}
+
+model McpServerTag {
+	id          String    @id @default(cuid())
+	mcpServerId String
+	tag         String
+
+	server McpServer @relation(fields: [mcpServerId], references: [id])
+
+	@@index([tag])
+}
+
+model AgentMcpLink {
+	id          String   @id @default(cuid())
+	userId      String
+	mcpServerId String
+	enabled     Boolean  @default(true)
+	configJson  Json?
+	createdAt   DateTime @default(now())
+	updatedAt   DateTime @updatedAt
+
+	user   User      @relation(fields: [userId], references: [id])
+	server McpServer @relation(fields: [mcpServerId], references: [id])
+
+	@@unique([userId, mcpServerId])
+}
+
+model AgentSession {
+	id         String               @id @default(cuid())
+	userId     String
+	graphState Json
+	checkpoint Json?
+	createdAt  DateTime             @default(now())
+	updatedAt  DateTime             @updatedAt
+
+	user     User                 @relation(fields: [userId], references: [id])
+	messages ConversationMessage[]
+}
+
+model ConversationMessage {
+	id        String   @id @default(cuid())
+	sessionId String
+	role      String
+	content   String   @db.Text
+	metadata  Json?
+	createdAt DateTime @default(now())
+
+	session AgentSession @relation(fields: [sessionId], references: [id])
+
+	@@index([sessionId])
+}
