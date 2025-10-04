@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { registryRouter } from './routes/registry';
 import { discoveryRouter } from './routes/discovery';
 import { toolsRouter } from './routes/tools';
+import { oauthRouter } from './routes/oauth';
 import { getPrisma } from './utils/prisma';
 import type { AppVariables, Bindings } from './types';
 
@@ -64,13 +65,7 @@ app.get('/.well-known/openid-configuration', (c) => {
 
 app.get('/auth/jwks', (c) => c.json({ keys: [] }));
 
-app.get('/auth/authorize', (c) =>
-  c.json({ error: 'not_implemented', message: 'Authorization endpoint not yet implemented' }, 501)
-);
-
-app.post('/auth/token', (c) =>
-  c.json({ error: 'not_implemented', message: 'Token endpoint not yet implemented' }, 501)
-);
+app.route('/auth', oauthRouter);
 
 app.route('/mcp/registry', registryRouter);
 app.route('/mcp/discovery', discoveryRouter);
