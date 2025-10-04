@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { registryRouter } from './routes/registry';
 import { discoveryRouter } from './routes/discovery';
+import { toolsRouter } from './routes/tools';
 import { getPrisma } from './utils/prisma';
 import type { AppVariables, Bindings } from './types';
 
@@ -72,6 +73,7 @@ app.post('/auth/token', (c) =>
 
 app.route('/mcp/registry', registryRouter);
 app.route('/mcp/discovery', discoveryRouter);
+app.route('/mcp/tools', toolsRouter);
 
 export default {
   fetch: app.fetch,

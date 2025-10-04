@@ -31,3 +31,8 @@ FRONTEND_URL=http://localhost:5173
 
 # MCP Server URL (for AI agent to call MCP tools)
 MCP_SERVER_URL=http://localhost:8788
+JWT_SECRET=your-jwt-secret-here
+
+# Optional: service token used when calling MCP discovery APIs
+MCP_SERVICE_TOKEN=optional-service-token
+
