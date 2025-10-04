@@ -1,3 +1,4 @@
+import './polyfills';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { registryRouter } from './routes/registry';
