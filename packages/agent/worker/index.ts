@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import { Google, generateState, generateCodeVerifier } from 'arctic';
 import { SignJWT } from 'jose';
+import { HumanMessage } from '@langchain/core/messages';
 import type { AppVariables, Bindings } from './types';
 import { getPrisma } from './utils/prisma';
 import { requireAuth } from './utils/auth';
@@ -13,6 +14,7 @@ import {
   serializeSessionWithMessages,
   serializeUser,
 } from './utils/serialization';
+import { createAgentGraph } from './graph';
 
 const SCOPE_AGENT = 'agent.session.manage';
 
@@ -583,9 +585,15 @@ app.post('/api/agent/chat', requireAuth([SCOPE_AGENT]), async (c) => {
     return c.json({ error: 'stream_not_supported' }, 400);
   }
 
+  // Validate OpenAI API key
+  const openaiApiKey = c.env.OPENAI_API_KEY;
+  if (!openaiApiKey) {
+    return c.json({ error: 'openai_api_key_not_configured' }, 500);
+  }
+
   const prisma = c.var.prisma;
   let session = parsed.data.sessionId
-    ? await prisma.agentSession.findUnique({ where: { id: parsed.data.sessionId } })
+    ? await prisma.agentSession.findUnique({ where: { id: parsed.data.sessionId }, include: { messages: true } })
     : null;
 
   if (session && session.userId !== auth.userId) {
@@ -597,13 +605,15 @@ app.post('/api/agent/chat', requireAuth([SCOPE_AGENT]), async (c) => {
       data: {
         userId: auth.userId,
         graphState: JSON.stringify({
-          history: [],
+          messages: [],
           createdAt: new Date().toISOString(),
         }),
       },
+      include: { messages: true },
     });
   }
 
+  // Save user message
   await prisma.conversationMessage.create({
     data: {
       sessionId: session.id,
@@ -612,51 +622,109 @@ app.post('/api/agent/chat', requireAuth([SCOPE_AGENT]), async (c) => {
     },
   });
 
-  const replyContent = `Echo: ${parsed.data.input}`;
+  try {
+    // Build MCP base URL
+    const mcpBaseUrl = c.env.MCP_BASE_URL || 'http://localhost:8788';
+    const serviceToken = pickServiceToken(c.env);
 
-  await prisma.conversationMessage.create({
-    data: {
-      sessionId: session.id,
-      role: 'assistant',
-      content: replyContent,
-      metadata: JSON.stringify({
-        kind: 'echo',
-      }),
-    },
-  });
-
-  const graphState = {
-    ...asJsonObject(session.graphState),
-    lastInput: parsed.data.input,
-    lastReply: replyContent,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await prisma.agentSession.update({
-    where: { id: session.id },
-    data: { graphState: JSON.stringify(graphState) },
-  });
-
-  const sessionWithMessages = await prisma.agentSession.findUnique({
-    where: { id: session.id },
-    include: { messages: true },
-  });
-
-  if (!sessionWithMessages || sessionWithMessages.userId !== auth.userId) {
-    throw new HTTPException(500, {
-      res: c.json({ error: 'session_refresh_failed' }, 500),
+    // Create LangGraph agent
+    const graph = createAgentGraph({
+      prisma,
+      userId: auth.userId,
+      openaiApiKey,
+      mcpBaseUrl,
+      serviceToken,
     });
+
+    // Restore previous messages from session
+    const previousMessages = session.messages.map((msg) => {
+      if (msg.role === 'user') {
+        return new HumanMessage(msg.content);
+      } else if (msg.role === 'assistant') {
+        return new HumanMessage(msg.content); // Will be replaced with AIMessage when properly structured
+      }
+      return new HumanMessage(msg.content);
+    });
+
+    // Add new user message
+    previousMessages.push(new HumanMessage(parsed.data.input));
+
+    // Invoke graph
+    const graphState = await graph.invoke({
+      messages: previousMessages,
+    });
+
+    // Extract assistant response
+    const lastMessage = graphState.messages[graphState.messages.length - 1];
+    const assistantContent = lastMessage?.content?.toString() || 'No response generated';
+
+    // Save assistant message
+    const assistantMessage = await prisma.conversationMessage.create({
+      data: {
+        sessionId: session.id,
+        role: 'assistant',
+        content: assistantContent,
+        metadata: JSON.stringify({
+          kind: 'langgraph',
+          messageCount: graphState.messages.length,
+        }),
+      },
+    });
+
+    // Update session state
+    await prisma.agentSession.update({
+      where: { id: session.id },
+      data: {
+        graphState: JSON.stringify({
+          messageCount: graphState.messages.length,
+          lastUpdated: new Date().toISOString(),
+        }),
+      },
+    });
+
+    // Fetch updated session
+    const sessionWithMessages = await prisma.agentSession.findUnique({
+      where: { id: session.id },
+      include: { messages: true },
+    });
+
+    if (!sessionWithMessages || sessionWithMessages.userId !== auth.userId) {
+      throw new HTTPException(500, {
+        res: c.json({ error: 'session_refresh_failed' }, 500),
+      });
+    }
+
+    const { session: serializedSession, messages } = serializeSessionWithMessages(sessionWithMessages);
+
+    return c.json({
+      sessionId: serializedSession.id,
+      session: serializedSession,
+      messages,
+      response: {
+        id: assistantMessage.id,
+        role: assistantMessage.role,
+        content: assistantMessage.content,
+        createdAt: assistantMessage.createdAt.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('Agent chat error:', error);
+
+    // Save error message
+    await prisma.conversationMessage.create({
+      data: {
+        sessionId: session.id,
+        role: 'assistant',
+        content: `Error: ${(error as Error).message}`,
+        metadata: JSON.stringify({
+          kind: 'error',
+          error: (error as Error).message,
+        }),
+      },
+    });
+
+    return c.json({ error: 'agent_execution_failed', details: (error as Error).message }, 500);
   }
-
-  const { session: serializedSession, messages } = serializeSessionWithMessages(sessionWithMessages);
-  const responseMessage = messages[messages.length - 1] ?? null;
-
-  return c.json({
-    sessionId: serializedSession.id,
-    session: serializedSession,
-    messages,
-    response: responseMessage,
-  });
 });
 
 app.get('/api/agent/state/:sessionId', requireAuth([SCOPE_AGENT]), async (c) => {

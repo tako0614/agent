@@ -99,14 +99,35 @@ npm run db:generate
 # packages/agent/.dev.vars を編集（Google OAuth設定など）
 # packages/mcp-server/.dev.vars を編集（必要に応じて）
 
-# 5. Agent アプリを開発モードで起動
+# 5. OpenAI API キーの設定（LangGraph Agent に必要）
+# packages/agent/.dev.vars に OPENAI_API_KEY を追加
+
+# 6. Agent アプリを開発モードで起動
 npm run dev:agent
 
-# 6. 別ターミナルで MCP サーバーを起動（オプション）
+# 7. 別ターミナルで MCP サーバーを起動（オプション）
 npm run dev:mcp
 ```
 
 詳細なセットアップ手順は [`D1_MIGRATION.md`](./D1_MIGRATION.md) を参照してください。
+
+## 🤖 LangGraph Agent
+
+`packages/agent` には **LangGraph** ベースのエージェント実装が含まれています。
+
+- **エンドポイント**: `/api/agent/chat`
+- **内蔵ツール**: MCP サーバー検索・追加・削除など
+- **LLM**: OpenAI (gpt-4o-mini)
+
+詳細は [`docs/LANGGRAPH_IMPLEMENTATION.md`](./docs/LANGGRAPH_IMPLEMENTATION.md) を参照してください。
+
+### 必要な環境変数
+
+```bash
+OPENAI_API_KEY=sk-...           # OpenAI API キー（必須）
+MCP_BASE_URL=http://localhost:8788  # MCP サーバー URL（オプション）
+MCP_SERVICE_TOKEN=...           # MCP サービストークン（オプション）
+```
 
 ## 🧭 Next Steps
 

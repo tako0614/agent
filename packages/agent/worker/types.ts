@@ -6,6 +6,8 @@ export type Bindings = {
   MCP_SERVER_URL: string;
   MCP_SERVICE_TOKEN?: string;
   MCP_ISSUER?: string;
+  MCP_BASE_URL?: string;
+  OPENAI_API_KEY?: string;
   ALLOWED_ORIGINS?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
