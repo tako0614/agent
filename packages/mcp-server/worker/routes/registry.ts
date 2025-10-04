@@ -7,7 +7,7 @@ import { serializeMcpServer } from '../utils/serialization';
 
 const listQuerySchema = z.object({
   tag: z.string().min(1).max(64).optional(),
-  status: z.nativeEnum(McpStatus).optional(),
+  status: z.enum(Object.values(McpStatus) as [string, ...string[]]).optional(),
   owner: z.string().min(1).optional(),
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -18,14 +18,14 @@ const registerSchema = z.object({
   url: z.string().url(),
   description: z.string().max(2000).optional(),
   tags: z.array(z.string().min(1).max(64)).max(32).default([]),
-  authType: z.nativeEnum(McpAuthType).default(McpAuthType.NONE),
+  authType: z.enum(Object.values(McpAuthType) as [string, ...string[]]).default(McpAuthType.NONE),
   ownerUserId: z.string().optional(),
 });
 
 const updateSchema = registerSchema
   .extend({
     id: z.string().min(1),
-    status: z.nativeEnum(McpStatus).optional(),
+  status: z.enum(Object.values(McpStatus) as [string, ...string[]]).optional(),
   })
   .partial({ name: true, url: true, authType: true, description: true, tags: true, ownerUserId: true, status: true })
   .refine((data) => Object.keys(data).some((key) => key !== 'id'), {
@@ -190,7 +190,7 @@ registryRouter.post('/disable', requireScopes(['mcp.registry.write']), async (c)
   try {
     const server = await prisma.mcpServer.update({
       where: { id: parsed.data.id },
-      data: { status: McpStatus.INACTIVE },
+  data: { status: McpStatus.DISABLED },
       include: { tags: true },
     });
 

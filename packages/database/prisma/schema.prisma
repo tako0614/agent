@@ -36,26 +36,15 @@ model OAuthAccount {
 	@@unique([provider, providerAccountId])
 }
 
-enum McpStatus {
-	ACTIVE
-	DISABLED
-	PENDING
-}
-
-enum McpAuthType {
-	NONE
-	OAUTH2
-	API_KEY
-}
-
 model McpServer {
 	id          String       @id
 	name        String
 	url         String       @unique
 	description String?
 	ownerUserId String?
-	status      McpStatus    @default(ACTIVE)
-	authType    McpAuthType  @default(NONE)
+	// Note: SQLite/D1 doesn't support Prisma enums. Use strings with constrained values at the app layer.
+	status      String       @default("ACTIVE")
+	authType    String       @default("NONE")
 	createdAt   DateTime     @default(now())
 	updatedAt   DateTime     @updatedAt
 
