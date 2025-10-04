@@ -31,7 +31,7 @@ app.use('*', async (c, next) => {
   const requestId = crypto.randomUUID();
   c.set('requestId', requestId);
   c.header('x-request-id', requestId);
-  c.set('prisma', getPrisma(c.env.DATABASE_URL));
+  c.set('prisma', getPrisma(c.env.DB));
   await next();
 });
 

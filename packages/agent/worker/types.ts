@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 export type Bindings = {
-  DATABASE_URL: string;
+  DB: D1Database;
   JWT_SECRET: string;
   MCP_SERVER_URL: string;
   MCP_SERVICE_TOKEN?: string;

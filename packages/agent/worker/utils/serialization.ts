@@ -50,7 +50,7 @@ export const serializeAgentLink = (link: AgentLinkWithServer) => ({
   userId: link.userId,
   mcpServerId: link.mcpServerId,
   enabled: link.enabled,
-  config: link.configJson ?? null,
+  config: link.configJson ? JSON.parse(link.configJson) : null,
   createdAt: link.createdAt.toISOString(),
   updatedAt: link.updatedAt.toISOString(),
   server: serializeMcpServer(link.server),
@@ -59,8 +59,8 @@ export const serializeAgentLink = (link: AgentLinkWithServer) => ({
 export const serializeSession = (session: AgentSession) => ({
   id: session.id,
   userId: session.userId,
-  graphState: session.graphState,
-  checkpoint: session.checkpoint ?? null,
+  graphState: JSON.parse(session.graphState),
+  checkpoint: session.checkpoint ? JSON.parse(session.checkpoint) : null,
   createdAt: session.createdAt.toISOString(),
   updatedAt: session.updatedAt.toISOString(),
 });
@@ -70,7 +70,7 @@ export const serializeConversationMessage = (message: ConversationMessage) => ({
   sessionId: message.sessionId,
   role: message.role,
   content: message.content,
-  metadata: message.metadata ?? null,
+  metadata: message.metadata ? JSON.parse(message.metadata) : null,
   createdAt: message.createdAt.toISOString(),
 });
 

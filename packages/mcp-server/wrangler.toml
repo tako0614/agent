@@ -6,6 +6,12 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "agent-db"
+database_id = "5d37dc65-7771-4e1a-bd9f-18d271fef90b"
+
 # Environment variables (set with wrangler secret put or .dev.vars)
 # OAuth 2.1 Configuration
 # MCP_ISSUER - OAuth issuer URL (e.g., https://mcp-api.example.com)
@@ -13,5 +19,4 @@ enabled = true
 # MCP_GOOGLE_CLIENT_ID - Google OAuth client ID
 # MCP_GOOGLE_CLIENT_SECRET - Google OAuth client secret
 # MCP_GOOGLE_REDIRECT_URI - OAuth redirect URL (e.g., https://mcp-api.example.com/auth/callback/google)
-# DATABASE_URL - PostgreSQL connection string
 # ALLOWED_ORIGINS - CORS allowed origins

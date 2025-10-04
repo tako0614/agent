@@ -1,0 +1,18 @@
+{
+  "name": "agent-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:agent": "npm run dev --workspace=packages/agent",
+    "dev:mcp": "npm run dev --workspace=packages/mcp-server",
+    "build": "npm run build --workspace=packages/database && npm run build --workspace=packages/agent && npm run build --workspace=packages/mcp-server",
+    "db:generate": "npm run db:generate --workspace=packages/database"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

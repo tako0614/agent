@@ -3,7 +3,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
-import { Prisma } from '@agent/database';
 import type { AppVariables, Bindings } from './types';
 import { getPrisma } from './utils/prisma';
 import { requireAuth } from './utils/auth';
@@ -62,11 +61,20 @@ const pickServiceToken = (env: Bindings, fallback?: string) => {
   return token.length > 0 ? token : null;
 };
 
-const asJsonObject = (value: unknown): Prisma.JsonObject => {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Prisma.JsonObject;
+const asJsonObject = (value: unknown): Record<string, unknown> => {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
   }
-
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
   return {};
 };
 
@@ -96,7 +104,7 @@ app.use('*', async (c, next) => {
   const requestId = crypto.randomUUID();
   c.set('requestId', requestId);
   c.header('x-request-id', requestId);
-  c.set('prisma', getPrisma(c.env.DATABASE_URL));
+  c.set('prisma', getPrisma(c.env.DB));
   await next();
 });
 
@@ -247,7 +255,7 @@ app.post('/api/mcp/link', requireAuth([SCOPE_AGENT]), async (c) => {
       data: {
         enabled: true,
         ...(Object.prototype.hasOwnProperty.call(parsed.data, 'config')
-          ? { configJson: (parsed.data.config ?? null) as Prisma.JsonValue | null }
+          ? { configJson: parsed.data.config ? JSON.stringify(parsed.data.config) : null }
           : {}),
       },
       include: { server: { include: { tags: true } } },
@@ -262,7 +270,7 @@ app.post('/api/mcp/link', requireAuth([SCOPE_AGENT]), async (c) => {
       mcpServerId: parsed.data.mcpServerId,
       enabled: true,
       ...(Object.prototype.hasOwnProperty.call(parsed.data, 'config')
-        ? { configJson: (parsed.data.config ?? null) as Prisma.JsonValue | null }
+        ? { configJson: parsed.data.config ? JSON.stringify(parsed.data.config) : null }
         : {}),
     },
     include: { server: { include: { tags: true } } },
@@ -392,10 +400,10 @@ app.post('/api/agent/chat', requireAuth([SCOPE_AGENT]), async (c) => {
     session = await prisma.agentSession.create({
       data: {
         userId: auth.userId,
-        graphState: {
+        graphState: JSON.stringify({
           history: [],
           createdAt: new Date().toISOString(),
-        } as Prisma.JsonObject,
+        }),
       },
     });
   }
@@ -415,13 +423,13 @@ app.post('/api/agent/chat', requireAuth([SCOPE_AGENT]), async (c) => {
       sessionId: session.id,
       role: 'assistant',
       content: replyContent,
-      metadata: {
+      metadata: JSON.stringify({
         kind: 'echo',
-      } as Prisma.JsonValue,
+      }),
     },
   });
 
-  const graphState: Prisma.JsonObject = {
+  const graphState = {
     ...asJsonObject(session.graphState),
     lastInput: parsed.data.input,
     lastReply: replyContent,
@@ -430,7 +438,7 @@ app.post('/api/agent/chat', requireAuth([SCOPE_AGENT]), async (c) => {
 
   await prisma.agentSession.update({
     where: { id: session.id },
-    data: { graphState },
+    data: { graphState: JSON.stringify(graphState) },
   });
 
   const sessionWithMessages = await prisma.agentSession.findUnique({
@@ -501,13 +509,13 @@ app.post('/api/agent/interrupt', requireAuth([SCOPE_AGENT]), async (c) => {
     return c.json({ error: 'session_not_found' }, 404);
   }
 
-  const checkpoint: Prisma.JsonObject = {
+  const checkpoint = {
     ...asJsonObject(session.checkpoint),
     interruptedAt: new Date().toISOString(),
     reason: parsed.data.reason ?? null,
   };
 
-  const graphState: Prisma.JsonObject = {
+  const graphState = {
     ...asJsonObject(session.graphState),
     status: 'interrupted',
   };
@@ -515,8 +523,8 @@ app.post('/api/agent/interrupt', requireAuth([SCOPE_AGENT]), async (c) => {
   await prisma.agentSession.update({
     where: { id: session.id },
     data: {
-      checkpoint,
-      graphState,
+      checkpoint: JSON.stringify(checkpoint),
+      graphState: JSON.stringify(graphState),
     },
   });
 

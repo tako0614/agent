@@ -1,16 +1,16 @@
-import { PrismaClient } from '@prisma/client/edge';
+import { PrismaClient } from '@prisma/client';
+import { PrismaD1 } from '@prisma/adapter-d1';
 
 let prismaSingleton: PrismaClient | undefined;
 
-export const getPrisma = (databaseUrl: string): PrismaClient => {
-  if (!databaseUrl) {
-    throw new Error('DATABASE_URL is not configured');
+export const getPrisma = (d1: D1Database): PrismaClient => {
+  if (!d1) {
+    throw new Error('D1 database binding is not configured');
   }
 
   if (!prismaSingleton) {
-    prismaSingleton = new PrismaClient({
-      datasourceUrl: databaseUrl,
-    });
+    const adapter = new PrismaD1(d1);
+    prismaSingleton = new PrismaClient({ adapter });
   }
 
   return prismaSingleton;

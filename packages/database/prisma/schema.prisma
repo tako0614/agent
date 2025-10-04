@@ -1,22 +1,11 @@
 generator client {
 	provider = "prisma-client-js"
+	previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
 	provider = "sqlite"
 	url      = env("DATABASE_URL")
-}
-
-enum McpStatus {
-	ACTIVE
-	INACTIVE
-	DEGRADED
-}
-
-enum McpAuthType {
-	NONE
-	API_KEY
-	OAUTH
 }
 
 model User {
@@ -54,8 +43,8 @@ model McpServer {
 	url         String       @unique
 	description String?
 	ownerUserId String?
-	status      McpStatus    @default(ACTIVE)
-	authType    McpAuthType  @default(NONE)
+	status      String       @default("ACTIVE")
+	authType    String       @default("NONE")
 	createdAt   DateTime     @default(now())
 	updatedAt   DateTime     @updatedAt
 
@@ -79,7 +68,7 @@ model AgentMcpLink {
 	userId      String
 	mcpServerId String
 	enabled     Boolean  @default(true)
-	configJson  Json?
+	configJson  String?
 	createdAt   DateTime @default(now())
 	updatedAt   DateTime @updatedAt
 
@@ -92,8 +81,8 @@ model AgentMcpLink {
 model AgentSession {
 	id         String               @id @default(cuid())
 	userId     String
-	graphState Json
-	checkpoint Json?
+	graphState String
+	checkpoint String?
 	createdAt  DateTime             @default(now())
 	updatedAt  DateTime             @updatedAt
 
@@ -105,8 +94,8 @@ model ConversationMessage {
 	id        String   @id @default(cuid())
 	sessionId String
 	role      String
-	content   String   @db.Text
-	metadata  Json?
+	content   String
+	metadata  String?
 	createdAt DateTime @default(now())
 
 	session AgentSession @relation(fields: [sessionId], references: [id])
