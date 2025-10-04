@@ -10,7 +10,7 @@ export const getPrisma = (d1: D1Database): PrismaClient => {
 
   if (!prismaSingleton) {
     const adapter = new PrismaD1(d1);
-    prismaSingleton = new PrismaClient({ adapter });
+    prismaSingleton = new PrismaClient({ adapter } as any);
   }
 
   return prismaSingleton;

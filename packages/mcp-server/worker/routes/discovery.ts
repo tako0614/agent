@@ -139,9 +139,9 @@ discoveryRouter.get('/search', requireScopes(['mcp.discovery.read']), async (c) 
 
   if (q) {
     where.OR = [
-      { name: { contains: q, mode: 'insensitive' } },
-      { description: { contains: q, mode: 'insensitive' } },
-      { tags: { some: { tag: { contains: q, mode: 'insensitive' } } } },
+      { name: { contains: q } },
+      { description: { contains: q } },
+      { tags: { some: { tag: { contains: q } } } },
     ];
   }
 
