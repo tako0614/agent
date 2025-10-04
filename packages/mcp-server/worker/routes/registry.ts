@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { McpAuthType, McpStatus, Prisma } from '@agent/database';
+import { McpAuthType, McpStatus, Prisma, type PrismaClient } from '@agent/database';
 import type { AppVariables, Bindings } from '../types';
 import { requireScopes } from '../utils/auth';
 import { serializeMcpServer } from '../utils/serialization';
@@ -143,7 +143,7 @@ registryRouter.post('/update', requireScopes(['mcp.registry.write']), async (c) 
   const prisma = c.var.prisma;
 
   try {
-    const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const updated = await prisma.$transaction(async (tx) => {
       if (Object.keys(rest).length > 0) {
         await tx.mcpServer.update({
           where: { id },
