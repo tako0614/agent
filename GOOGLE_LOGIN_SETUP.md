@@ -48,11 +48,11 @@ npm run dev:agent
 `.dev.vars`ファイルに以下の設定が必要です（既に設定済み）:
 
 ```env
-GOOGLE_CLIENT_ID=809769910884-4dkujbe9q8mi8824t3gh5guo1ujhr8n8.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=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
-GOOGLE_REDIRECT_URI=http://127.0.0.1:8787/auth/callback/google
-JWT_SECRET=your-very-secret-jwt-key-change-this-in-production
-MCP_ISSUER=http://127.0.0.1:8787
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=
+JWT_SECRET
+MCP_ISSUER
 ```
 
 ## 技術スタック
